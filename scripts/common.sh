@@ -7,6 +7,19 @@ if [ -f "$STUDIO_ROOT/.env" ]; then
   set +a
 fi
 
+if [ -x "$HOME/.local/bin/uv" ]; then
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+if [ -x "$HOME/anaconda3/bin/conda" ]; then
+  export PATH="$HOME/anaconda3/bin:$PATH"
+fi
+if [ -n "${CUDA_HOME:-}" ]; then
+  export PATH="$CUDA_HOME/bin:$PATH"
+elif [ -x /usr/local/cuda-12.4/bin/nvcc ]; then
+  export CUDA_HOME=/usr/local/cuda-12.4
+  export PATH="$CUDA_HOME/bin:$PATH"
+fi
+
 DATA_ROOT="${ASSET_STUDIO_DATA_ROOT:-/root/autodl-tmp/agy-game-asset-studio}"
 SOURCE_ROOT="$DATA_ROOT/sources"
 ENV_ROOT="$DATA_ROOT/envs"
@@ -19,13 +32,15 @@ export TMPDIR="$DATA_ROOT/scratch"
 export TMP="$TMPDIR"
 export TEMP="$TMPDIR"
 export TORCH_EXTENSIONS_DIR="$DATA_ROOT/cache/torch_extensions"
+export UV_CACHE_DIR="$DATA_ROOT/cache/uv"
+export UV_PYTHON_INSTALL_DIR="$DATA_ROOT/python"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9}"
 
-mkdir -p "$SOURCE_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$DATA_ROOT/logs"
+mkdir -p "$SOURCE_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$DATA_ROOT/logs"
 
-if ! command -v conda >/dev/null 2>&1; then
-  echo 'AutoDL 实例需要先安装 Conda，并在 shell 中启用 conda 命令。' >&2
+if ! command -v uv >/dev/null 2>&1 && ! command -v conda >/dev/null 2>&1; then
+  echo '部署环境需要 uv 或 Conda。' >&2
   exit 1
 fi
 
@@ -33,7 +48,11 @@ make_env() {
   local name="$1"
   local py_version="$2"
   if [ ! -x "$ENV_ROOT/$name/bin/python" ]; then
-    conda create -y -p "$ENV_ROOT/$name" "python=$py_version"
+    if command -v uv >/dev/null 2>&1; then
+      uv venv --seed --python "$py_version" "$ENV_ROOT/$name"
+    else
+      conda create -y --override-channels -c https://repo.anaconda.com/pkgs/main -p "$ENV_ROOT/$name" "python=$py_version"
+    fi
   fi
 }
 
