@@ -16,6 +16,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File windows/Register-XMU21-Asset
 它会注册每分钟运行的 Windows 计划任务，自动建立 `127.0.0.1:18333` 到 xmu21 的 SSH 隧道，并在连接中断后重新连接。原先指向 xmu85 的计划任务应保持禁用。
 
 xmu21 上的二次元原画服务使用 ComfyUI v0.29.2，兼容已验证的 PyTorch 2.6.0 CUDA 环境。安装脚本会复用此前下载的 WAI Illustrious v17 权重。
+Pixal3D 的单视图与多视图权重统一保存至 `asset-studio-data/models/Pixal3D`，DINOv3、MoGe-2 和 NAF 辅助权重分别保存在 Hugging Face 缓存和 Torch Hub 缓存中。PartCrafter 和 SkinTokens 的权重保存在各自的源码目录中。
 
 xmu21 使用以下配置安装：
 
@@ -23,6 +24,7 @@ xmu21 使用以下配置安装：
 cd /data/xmu/ym/services/AGY-GameAsset-Studio
 cp .env.xmu21.example .env
 bash scripts/install-blender.sh
+bash scripts/download-models.sh all
 bash scripts/install-autodl.sh all
 bash scripts/start.sh
 ```
@@ -52,6 +54,7 @@ bash scripts/start.sh
 git clone https://github.com/1210350468/AGY-GameAsset-Studio.git
 cd AGY-GameAsset-Studio
 cp .env.example .env
+bash scripts/download-models.sh all
 bash scripts/install-autodl.sh all
 bash scripts/start.sh
 ```

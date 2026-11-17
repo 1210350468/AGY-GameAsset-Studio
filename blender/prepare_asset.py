@@ -27,8 +27,8 @@ if not meshes:
 total_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
 has_armature = any(item.type == "ARMATURE" for item in bpy.data.objects)
 
-# 保留角色的骨骼、蒙皮与动画。未绑定骨骼的静态网格执行减面。
-if not has_armature and total_triangles > arguments.target_faces:
+# 对角色和静态模型统一执行减面，保留 Armature、顶点权重和原始材质。
+if total_triangles > arguments.target_faces:
     fraction = arguments.target_faces / total_triangles
     for obj in meshes:
         bpy.ops.object.select_all(action="DESELECT")
@@ -38,7 +38,12 @@ if not has_armature and total_triangles > arguments.target_faces:
             continue
         modifier = obj.modifiers.new(name="GameAssetDecimate", type="DECIMATE")
         modifier.ratio = max(0.001, fraction)
+        obj.modifiers.move(len(obj.modifiers) - 1, 0)
         bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+output_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
+if output_triangles > arguments.target_faces * 1.05:
+    raise RuntimeError(f"模型超过面数要求：{output_triangles} > {arguments.target_faces}")
 
 for obj in meshes:
     if not obj.data.uv_layers:
@@ -61,6 +66,7 @@ print(json.dumps({
     "output": str(destination),
     "meshes": len(meshes),
     "input_triangles": total_triangles,
+    "output_triangles": output_triangles,
     "rigged": has_armature,
     "output_bytes": destination.stat().st_size,
 }, ensure_ascii=False))

@@ -54,6 +54,12 @@ class Settings:
         return self.sources / "Pixal3D"
 
     @property
+    def pixal_model_path(self) -> Path:
+        return Path(os.environ.get(
+            "ASSET_STUDIO_PIXAL_MODEL_ROOT", str(self.data_root / "models" / "Pixal3D")
+        )).resolve()
+
+    @property
     def part_repo(self) -> Path:
         return self.sources / "PartCrafter"
 

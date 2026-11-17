@@ -19,14 +19,21 @@ elif [ -x /usr/local/cuda-12.4/bin/nvcc ]; then
   export CUDA_HOME=/usr/local/cuda-12.4
   export PATH="$CUDA_HOME/bin:$PATH"
 fi
+if [ -n "${CUDA_HOME:-}" ]; then
+  export CUDACXX="$CUDA_HOME/bin/nvcc"
+  export CUDAToolkit_ROOT="$CUDA_HOME"
+  export CMAKE_CUDA_COMPILER="$CUDACXX"
+fi
 
 DATA_ROOT="${ASSET_STUDIO_DATA_ROOT:-/root/autodl-tmp/agy-game-asset-studio}"
 SOURCE_ROOT="$DATA_ROOT/sources"
 ENV_ROOT="$DATA_ROOT/envs"
 INSTALL_ROOT="$DATA_ROOT/installed"
+MODEL_ROOT="$DATA_ROOT/models"
 MODEL_CHECKPOINT="${ASSET_STUDIO_IMAGE_CHECKPOINT:-waiIllustriousSDXL_v170.safetensors}"
 
 export HF_HOME="$DATA_ROOT/cache/huggingface"
+export TORCH_HOME="$DATA_ROOT/cache/torch"
 export HF_ENDPOINT="${ASSET_STUDIO_HF_ENDPOINT:-${HF_ENDPOINT:-https://hf-mirror.com}}"
 export PIP_CACHE_DIR="$DATA_ROOT/cache/pip"
 export XDG_CACHE_HOME="$DATA_ROOT/cache/xdg"
@@ -39,7 +46,7 @@ export UV_PYTHON_INSTALL_DIR="$DATA_ROOT/python"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0}"
 
-mkdir -p "$SOURCE_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$DATA_ROOT/logs"
+mkdir -p "$SOURCE_ROOT" "$MODEL_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$DATA_ROOT/logs"
 
 if ! command -v uv >/dev/null 2>&1 && ! command -v conda >/dev/null 2>&1; then
   echo '部署环境需要 uv 或 Conda。' >&2

@@ -63,7 +63,7 @@ class AssetPipeline:
         completed = settings.data_root / "installed"
         return {
             "anime": {"model": settings.checkpoint, "installed": settings.image_checkpoint.is_file() and comfy_path.is_file() and (completed / "anime").is_file()},
-            "pixal3d": {"installed": settings.pixal_python.is_file() and (settings.pixal_repo / "inference.py").is_file() and (completed / "pixal3d").is_file()},
+            "pixal3d": {"installed": settings.pixal_python.is_file() and (settings.pixal_repo / "inference.py").is_file() and (settings.pixal_model_path / "pipeline.json").is_file() and (completed / "pixal3d").is_file()},
             "partcrafter": {"installed": settings.part_python.is_file() and (settings.part_repo / "scripts" / "inference_partcrafter.py").is_file() and (completed / "partcrafter").is_file()},
             "skintokens": {"installed": settings.rig_python.is_file() and (settings.rig_repo / "demo.py").is_file() and (completed / "skintokens").is_file()},
             "blender": {"installed": settings.blender_binary() is not None},
@@ -135,6 +135,7 @@ class AssetPipeline:
                     args = [
                         str(settings.pixal_python), "inference.py", "--image", str(concept),
                         "--output", str(generated), "--seed", str(params["seed"]),
+                        "--model_path", str(settings.pixal_model_path),
                     ]
                     if settings.pixal_low_vram:
                         args.extend(["--low_vram", "--resolution", "1024"])

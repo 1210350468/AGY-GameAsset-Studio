@@ -9,6 +9,7 @@ case "$TARGET" in
 esac
 
 if [ "$TARGET" = all ]; then
+  bash "$STUDIO_ROOT/scripts/download-models.sh" all
   for part in api anime pixal3d partcrafter skintokens; do
     bash "$STUDIO_ROOT/scripts/install-autodl.sh" "$part"
   done
@@ -99,10 +100,15 @@ if [ "$TARGET" = pixal3d ]; then
   export NATTEN_CUDA_ARCH="${NATTEN_CUDA_ARCH:-8.0}"
   export NATTEN_N_WORKERS="${NATTEN_N_WORKERS:-4}"
   "$ENV_ROOT/pixal/bin/python" -m pip install natten==0.21.0 --no-build-isolation
-  "$ENV_ROOT/pixal/bin/python" -m pip install \
-    https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl
+  UTILS3D_WHEEL="$DATA_ROOT/source-archives/utils3d-0.0.2-py3-none-any.whl"
+  if [ ! -s "$UTILS3D_WHEEL" ]; then
+    curl --fail --location --retry 4 --output "$UTILS3D_WHEEL" \
+      https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl
+  fi
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-deps "$UTILS3D_WHEEL"
   verify_torch "$ENV_ROOT/pixal/bin/python"
   (cd "$SOURCE_ROOT/Pixal3D" && "$ENV_ROOT/pixal/bin/python" -c 'from pixal3d.pipelines import Pixal3DImageTo3DPipeline; import o_voxel; print("Pixal3D imports passed")')
+  test -s "$MODEL_ROOT/Pixal3D/pipeline.json"
   touch "$INSTALL_ROOT/pixal3d"
   exit 0
 fi
@@ -138,9 +144,12 @@ if [ "$TARGET" = skintokens ]; then
   "$ENV_ROOT/rig/bin/python" -m pip install --upgrade pip setuptools wheel ninja packaging
   "$ENV_ROOT/rig/bin/python" -m pip install -r "$SOURCE_ROOT/SkinTokens/requirements.txt" -c "$STUDIO_ROOT/requirements/skintokens-constraints.txt"
   "$ENV_ROOT/rig/bin/python" -m pip install scipy==1.15.3
-  export FLASH_ATTENTION_FORCE_BUILD=TRUE
-  export MAX_JOBS="${MAX_JOBS:-2}"
-  "$ENV_ROOT/rig/bin/python" -m pip install flash-attn==2.7.4.post1 --no-build-isolation --no-binary flash-attn
+  FLASH_WHEEL="$DATA_ROOT/source-archives/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl"
+  if [ ! -s "$FLASH_WHEEL" ]; then
+    curl --fail --location --retry 4 --output "$FLASH_WHEEL" \
+      'https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1%2Bcu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl'
+  fi
+  "$ENV_ROOT/rig/bin/python" -m pip install --no-deps "$FLASH_WHEEL"
   (cd "$SOURCE_ROOT/SkinTokens" && "$ENV_ROOT/rig/bin/python" download.py --model)
   verify_torch "$ENV_ROOT/rig/bin/python"
   (cd "$SOURCE_ROOT/SkinTokens" && "$ENV_ROOT/rig/bin/python" demo.py --help >/dev/null)
