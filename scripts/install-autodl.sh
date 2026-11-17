@@ -66,7 +66,20 @@ if [ "$TARGET" = pixal3d ]; then
   get_repo https://github.com/NVlabs/nvdiffrast.git "$SOURCE_ROOT/nvdiffrast" v0.4.0 tags
   get_repo https://github.com/JeffreyXiang/nvdiffrec.git "$SOURCE_ROOT/nvdiffrec" renderutils
   get_repo https://github.com/JeffreyXiang/CuMesh.git "$SOURCE_ROOT/CuMesh"
+  get_repo https://github.com/JeffreyXiang/cubvh.git \
+    "$SOURCE_ROOT/CuMesh/third_party/cubvh" \
+    ce92267a24ef6ad7d2c8ccbc2ae2c021a6597e70 commit
   get_repo https://github.com/JeffreyXiang/FlexGEMM.git "$SOURCE_ROOT/FlexGEMM"
+  EIGEN_COMMIT=21e4582d1739107337a03460c81412981130373e
+  EIGEN_DIR="$SOURCE_ROOT/TRELLIS.2/o-voxel/third_party/eigen"
+  if [ ! -f "$EIGEN_DIR/Eigen/Core" ]; then
+    mkdir -p "$EIGEN_DIR"
+    curl --fail --location --retry 4 --retry-delay 3 \
+      --output "$DATA_ROOT/source-archives/eigen-$EIGEN_COMMIT.tar.gz" \
+      "https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_COMMIT/eigen-$EIGEN_COMMIT.tar.gz"
+    tar -xzf "$DATA_ROOT/source-archives/eigen-$EIGEN_COMMIT.tar.gz" --strip-components=1 -C "$EIGEN_DIR"
+    test -f "$EIGEN_DIR/Eigen/Core"
+  fi
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/nvdiffrast"
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/nvdiffrec"
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/CuMesh"

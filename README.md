@@ -9,6 +9,7 @@
 在已经配置 `xmu21-a800` SSH 别名的 Windows 计算机上，可以运行以下工作台自动连接脚本：
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File windows/Install-AGY-Skill.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File windows/Register-XMU21-Asset-Studio.ps1
 ```
 

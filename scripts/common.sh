@@ -65,13 +65,17 @@ get_repo() {
   local repository="${url#https://github.com/}"
   repository="${repository%.git}"
   local archive="$DATA_ROOT/source-archives/$(basename "$target")-${ref}.tar.gz"
+  local archive_url="https://codeload.github.com/$repository/tar.gz/refs/$ref_type/$ref"
+  if [ "$ref_type" = commit ]; then
+    archive_url="https://codeload.github.com/$repository/tar.gz/$ref"
+  fi
   if [ -f "$target/.source-ready" ]; then
     return
   fi
   mkdir -p "$DATA_ROOT/source-archives" "$target"
   curl --fail --location --retry 4 --retry-delay 3 \
     --output "$archive" \
-    "https://codeload.github.com/$repository/tar.gz/refs/$ref_type/$ref"
+    "$archive_url"
   tar -xzf "$archive" --strip-components=1 -C "$target"
   touch "$target/.source-ready"
 }
