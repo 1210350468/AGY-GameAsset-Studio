@@ -150,7 +150,10 @@ class AssetPipeline:
                         "--tag", job_id, "--num_parts", str(params["num_parts"]),
                         "--seed", str(params["seed"]), "--rmbg",
                     ]
-                    self._command(args, cwd=settings.part_repo, log=log)
+                    self._command(
+                        args, cwd=settings.part_repo, log=log,
+                        env={"PYTHONPATH": str(settings.part_repo) + os.pathsep + os.environ.get("PYTHONPATH", "")},
+                    )
                     generated = output_root / job_id / "object.glb"
                 else:
                     raise RuntimeError(f"Unsupported mode: {job['mode']}")

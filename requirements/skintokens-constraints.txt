@@ -1,0 +1,7 @@
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+diffusers==0.35.2
+transformers==4.57.3
+gradio==5.49.1
+flash-attn==2.7.4.post1

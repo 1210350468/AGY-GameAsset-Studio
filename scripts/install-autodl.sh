@@ -84,18 +84,19 @@ if [ "$TARGET" = pixal3d ]; then
     mkdir -p "$EIGEN_DIR"
     curl --fail --location --retry 4 --retry-delay 3 \
       --output "$DATA_ROOT/source-archives/eigen-$EIGEN_COMMIT.tar.gz" \
-      "https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_COMMIT/eigen-$EIGEN_COMMIT.tar.gz"
+      "https://codeload.github.com/eigen-mirror/eigen/tar.gz/$EIGEN_COMMIT"
     tar -xzf "$DATA_ROOT/source-archives/eigen-$EIGEN_COMMIT.tar.gz" --strip-components=1 -C "$EIGEN_DIR"
     test -f "$EIGEN_DIR/Eigen/Core"
   fi
+  export CPATH="$EIGEN_DIR${CPATH:+:$CPATH}"
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/nvdiffrast"
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/nvdiffrec"
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/CuMesh"
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/FlexGEMM"
-  "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/TRELLIS.2/o-voxel"
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-deps --no-build-isolation "$SOURCE_ROOT/TRELLIS.2/o-voxel"
   "$ENV_ROOT/pixal/bin/python" -m pip install flash-attn==2.7.3 --no-build-isolation
 
-  export NATTEN_CUDA_ARCH="${NATTEN_CUDA_ARCH:-8.9}"
+  export NATTEN_CUDA_ARCH="${NATTEN_CUDA_ARCH:-8.0}"
   export NATTEN_N_WORKERS="${NATTEN_N_WORKERS:-4}"
   "$ENV_ROOT/pixal/bin/python" -m pip install natten==0.21.0 --no-build-isolation
   "$ENV_ROOT/pixal/bin/python" -m pip install \
@@ -120,6 +121,11 @@ if [ "$TARGET" = partcrafter ]; then
   "$ENV_ROOT/parts/bin/python" -m pip install -r "$SOURCE_ROOT/PartCrafter/settings/requirements.txt" -c "$STUDIO_ROOT/requirements/partcrafter-constraints.txt"
   verify_torch "$ENV_ROOT/parts/bin/python"
   (cd "$SOURCE_ROOT/PartCrafter" && "$ENV_ROOT/parts/bin/python" -c 'from src.pipelines.pipeline_partcrafter import PartCrafterPipeline; print("PartCrafter imports passed")')
+  mkdir -p "$SOURCE_ROOT/PartCrafter/pretrained_weights"
+  "$ENV_ROOT/parts/bin/hf" download wgsxm/PartCrafter --local-dir "$SOURCE_ROOT/PartCrafter/pretrained_weights/PartCrafter" --max-workers 4
+  "$ENV_ROOT/parts/bin/hf" download briaai/RMBG-1.4 --local-dir "$SOURCE_ROOT/PartCrafter/pretrained_weights/RMBG-1.4" --max-workers 4
+  test -s "$SOURCE_ROOT/PartCrafter/pretrained_weights/PartCrafter/model_index.json"
+  test -s "$SOURCE_ROOT/PartCrafter/pretrained_weights/RMBG-1.4/config.json"
   touch "$INSTALL_ROOT/partcrafter"
   exit 0
 fi
@@ -130,10 +136,14 @@ if [ "$TARGET" = skintokens ]; then
   get_repo https://github.com/VAST-AI-Research/SkinTokens.git "$SOURCE_ROOT/SkinTokens"
   "$ENV_ROOT/rig/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
   "$ENV_ROOT/rig/bin/python" -m pip install --upgrade pip setuptools wheel ninja packaging
-  "$ENV_ROOT/rig/bin/python" -m pip install -r "$SOURCE_ROOT/SkinTokens/requirements.txt"
-  "$ENV_ROOT/rig/bin/python" -m pip install flash-attn --no-build-isolation
+  "$ENV_ROOT/rig/bin/python" -m pip install -r "$SOURCE_ROOT/SkinTokens/requirements.txt" -c "$STUDIO_ROOT/requirements/skintokens-constraints.txt"
+  "$ENV_ROOT/rig/bin/python" -m pip install scipy==1.15.3
+  export FLASH_ATTENTION_FORCE_BUILD=TRUE
+  export MAX_JOBS="${MAX_JOBS:-2}"
+  "$ENV_ROOT/rig/bin/python" -m pip install flash-attn==2.7.4.post1 --no-build-isolation --no-binary flash-attn
   (cd "$SOURCE_ROOT/SkinTokens" && "$ENV_ROOT/rig/bin/python" download.py --model)
   verify_torch "$ENV_ROOT/rig/bin/python"
+  (cd "$SOURCE_ROOT/SkinTokens" && "$ENV_ROOT/rig/bin/python" demo.py --help >/dev/null)
   touch "$INSTALL_ROOT/skintokens"
   exit 0
 fi

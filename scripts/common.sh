@@ -27,6 +27,7 @@ INSTALL_ROOT="$DATA_ROOT/installed"
 MODEL_CHECKPOINT="${ASSET_STUDIO_IMAGE_CHECKPOINT:-waiIllustriousSDXL_v170.safetensors}"
 
 export HF_HOME="$DATA_ROOT/cache/huggingface"
+export HF_ENDPOINT="${ASSET_STUDIO_HF_ENDPOINT:-${HF_ENDPOINT:-https://hf-mirror.com}}"
 export PIP_CACHE_DIR="$DATA_ROOT/cache/pip"
 export XDG_CACHE_HOME="$DATA_ROOT/cache/xdg"
 export TMPDIR="$DATA_ROOT/scratch"
@@ -36,7 +37,7 @@ export TORCH_EXTENSIONS_DIR="$DATA_ROOT/cache/torch_extensions"
 export UV_CACHE_DIR="$DATA_ROOT/cache/uv"
 export UV_PYTHON_INSTALL_DIR="$DATA_ROOT/python"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
-export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9}"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0}"
 
 mkdir -p "$SOURCE_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$DATA_ROOT/logs"
 
