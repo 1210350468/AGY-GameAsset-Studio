@@ -39,6 +39,8 @@ if [ "$TARGET" = pixal3d ]; then
   "$HF" download TencentARC/Pixal3D --local-dir "$MODEL_ROOT/Pixal3D" --max-workers 4
   "$HF" download camenduru/dinov3-vitl16-pretrain-lvd1689m --max-workers 4
   "$HF" download Ruicheng/moge-2-vitl --max-workers 4
+  "$HF" download ZhengPeng7/BiRefNet --max-workers 4
+  cp "$STUDIO_ROOT/config/pixal-pipeline.json" "$MODEL_ROOT/Pixal3D/pipeline.json"
 
   get_repo https://github.com/valeoai/NAF.git "$SOURCE_ROOT/NAF" main heads
   mkdir -p "$TORCH_HOME/hub/checkpoints"
