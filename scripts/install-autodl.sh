@@ -109,7 +109,7 @@ if [ "$TARGET" = partcrafter ]; then
   get_repo https://github.com/wgsxm/PartCrafter.git "$SOURCE_ROOT/PartCrafter"
   "$ENV_ROOT/parts/bin/python" -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
   "$ENV_ROOT/parts/bin/python" -m pip install torch-cluster -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
-  "$ENV_ROOT/parts/bin/python" -m pip install -r "$SOURCE_ROOT/PartCrafter/settings/requirements.txt"
+  "$ENV_ROOT/parts/bin/python" -m pip install -r "$SOURCE_ROOT/PartCrafter/settings/requirements.txt" -c "$STUDIO_ROOT/requirements/partcrafter-constraints.txt"
   verify_torch "$ENV_ROOT/parts/bin/python"
   (cd "$SOURCE_ROOT/PartCrafter" && "$ENV_ROOT/parts/bin/python" -c 'from src.pipelines.pipeline_partcrafter import PartCrafterPipeline; print("PartCrafter imports passed")')
   touch "$INSTALL_ROOT/partcrafter"
