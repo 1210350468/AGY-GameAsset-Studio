@@ -67,6 +67,7 @@ class AssetPipeline:
             "partcrafter": {"installed": settings.part_python.is_file() and (settings.part_repo / "scripts" / "inference_partcrafter.py").is_file() and (completed / "partcrafter").is_file()},
             "skintokens": {"installed": settings.rig_python.is_file() and (settings.rig_repo / "demo.py").is_file() and (completed / "skintokens").is_file()},
             "blender": {"installed": settings.blender_binary() is not None},
+            "godot": {"installed": settings.godot_binary() is not None},
         }
 
     def _worker(self) -> None:
@@ -190,7 +191,42 @@ class AssetPipeline:
 
             self._stage(job_id, "检查模型并打包 Godot 资源", 0.93)
             self._package(job, job_dir, final_model)
+            self._stage(job_id, "Godot 场景创建与导入验证", 0.97)
+            self._godot_stage(job, job_dir, log)
             self.store.update(job_id, status="completed", stage="completed", progress=1.0)
+
+    def _godot_stage(self, job: dict[str, Any], job_dir: Path, log) -> None:
+        executable = self.settings.godot_binary()
+        if executable is None:
+            raise FileNotFoundError("Godot 编辑器尚未安装")
+
+        project = job_dir / "godot_project"
+        asset = project / "assets" / "generated" / job["id"]
+        scripts = project / "godot"
+        asset.mkdir(parents=True, exist_ok=False)
+        scripts.mkdir(parents=True, exist_ok=False)
+
+        source_scripts = self.settings.root / "godot"
+        for name in ("AssetStudioSceneBuilder.gd", "AssetStudioBatch.gd"):
+            shutil.copy2(source_scripts / name, scripts / name)
+        shutil.copy2(source_scripts / "project.godot", project / "project.godot")
+        for name in ("model.glb", "manifest.json"):
+            shutil.copy2(job_dir / name, asset / name)
+
+        self._command([executable, "--headless", "--editor", "--path", str(project), "--import"], cwd=project, log=log)
+        self._command(
+            [executable, "--headless", "--path", str(project), "--script",
+             "res://godot/AssetStudioBatch.gd", "--", job["id"]],
+            cwd=project, log=log,
+        )
+
+        scene = asset / "game_asset.tscn"
+        if not scene.is_file() or scene.stat().st_size == 0:
+            raise FileNotFoundError("Godot 未生成有效的 game_asset.tscn")
+        shutil.copy2(scene, job_dir / "game_asset.tscn")
+        with zipfile.ZipFile(job_dir / "godot_asset.zip", "a", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.write(job_dir / "game_asset.tscn", arcname="game_asset.tscn")
+        shutil.rmtree(project)
 
     def _package(self, job: dict[str, Any], job_dir: Path, final_model: Path) -> None:
         scene = trimesh.load(final_model, force="scene")
@@ -208,6 +244,10 @@ class AssetPipeline:
             "faces": face_count,
             "bounds": bounds,
             "skinned": has_skeleton,
+            "joints": sum(len(skin.joints) for skin in gltf.skins),
+            "materials": len(gltf.materials),
+            "textures": len(gltf.textures),
+            "images": len(gltf.images),
             "watertight_meshes": sum(bool(mesh.is_watertight) for mesh in geometries),
             "source": "actual GLB geometry inspection",
         }
@@ -215,7 +255,7 @@ class AssetPipeline:
         manifest = {
             "asset_id": job["id"], "title": job["title"], "type": job["kind"],
             "mode": job["mode"], "created_at": job["created_at"],
-            "model": "model.glb", "engine": "Godot 4", "quality": quality,
+            "model": "model.glb", "scene": "game_asset.tscn", "engine": "Godot 4", "quality": quality,
             "rig_generated": has_skeleton,
             "animations_included": bool(gltf.animations),
         }

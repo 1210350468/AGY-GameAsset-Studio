@@ -12,6 +12,11 @@ for name in api anime pixal3d partcrafter skintokens; do
     echo "尚未安装 $name"
   fi
 done
+if [ -x "$DATA_ROOT/tools/godot-4.7.2/Godot_v4.7.2-stable_linux.x86_64" ]; then
+  "$DATA_ROOT/tools/godot-4.7.2/Godot_v4.7.2-stable_linux.x86_64" --headless --version
+else
+  echo '尚未安装 Godot 4.7.2'
+fi
 announce '数据盘情况'
 df -h "$DATA_ROOT"
 announce 'API 状态'

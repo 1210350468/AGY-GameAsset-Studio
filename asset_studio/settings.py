@@ -17,6 +17,7 @@ class Settings:
     blender: str
     timeout_seconds: int
     min_free_gpu_mib: int = 0
+    godot: str = "godot"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -31,6 +32,7 @@ class Settings:
             blender=os.environ.get("ASSET_STUDIO_BLENDER", "blender"),
             timeout_seconds=int(os.environ.get("ASSET_STUDIO_TIMEOUT_SECONDS", "7200")),
             min_free_gpu_mib=int(os.environ.get("ASSET_STUDIO_MIN_GPU_FREE_MIB", "0")),
+            godot=os.environ.get("ASSET_STUDIO_GODOT", "godot"),
         )
 
     @property
@@ -82,6 +84,15 @@ class Settings:
     def blender_binary(self) -> str | None:
         path = Path(self.blender)
         return str(path) if path.is_file() else shutil.which(self.blender)
+
+    def godot_binary(self) -> str | None:
+        configured = Path(self.godot)
+        if configured.is_file():
+            return str(configured)
+        installed = self.data_root / "tools" / "godot-4.7.2" / "Godot_v4.7.2-stable_linux.x86_64"
+        if installed.is_file():
+            return str(installed)
+        return shutil.which(self.godot)
 
     def prepare_directories(self) -> None:
         self.data_root.mkdir(parents=True, exist_ok=True)

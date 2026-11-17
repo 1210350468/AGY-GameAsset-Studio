@@ -24,6 +24,7 @@ xmu21 使用以下配置安装：
 cd /data/xmu/ym/services/AGY-GameAsset-Studio
 cp .env.xmu21.example .env
 bash scripts/install-blender.sh
+bash scripts/install-godot.sh
 bash scripts/download-models.sh all
 bash scripts/install-autodl.sh all
 bash scripts/start.sh
@@ -69,6 +70,7 @@ bash scripts/install-autodl.sh anime
 bash scripts/install-autodl.sh pixal3d
 bash scripts/install-autodl.sh partcrafter
 bash scripts/install-autodl.sh skintokens
+bash scripts/install-autodl.sh godot
 bash scripts/doctor.sh
 bash scripts/start.sh
 ```
@@ -100,7 +102,8 @@ ssh -N -L 127.0.0.1:18333:127.0.0.1:18333 -p <AutoDL-SSH端口> root@<AutoDL-SSH
 - **完整模型**：Pixal3D 生成几何与材质。
 - **可拆分部件**：PartCrafter 生成多个独立 GLB 及组合模型。
 - **自动骨骼**：角色与怪物使用 SkinTokens，输入角色和复杂异形时仍需要检查骨骼效果。
-- **Blender**：统一导出 GLB，静态模型自动减面和生成缺失的 UV。
+- **Blender**：统一执行减面处理，保留模型骨骼与材质，生成缺失的 UV 并导出 GLB。
+- **Godot 4.7.2**：通过无界面引擎实际导入 GLB，创建含碰撞体的 `game_asset.tscn`，并验证生成的场景能够重新加载。
 - **资产库**：展示成功模型，下载 GLB 和包含元数据的 Godot 资源包。
 
 所有步骤保留真实进度状态与子进程日志。角色生成包记录是否存在骨骼和动画。独立动作生成、动画重定向及武器挂点编辑属于后续 Godot 游戏侧流程，需要结合实际角色动作制作。
@@ -133,11 +136,11 @@ curl -X POST http://127.0.0.1:18333/api/import \
   -F 'title=遗迹石柱' -F 'kind=prop' -F 'file=@column.glb'
 ```
 
-查询任务：`GET /api/jobs/{job_id}`；读取日志：`GET /api/jobs/{job_id}/log`；下载完整资源包：`GET /api/jobs/{job_id}/file/godot_asset.zip`；下载 GLB：`GET /api/jobs/{job_id}/file/model.glb`。
+查询任务：`GET /api/jobs/{job_id}`；读取日志：`GET /api/jobs/{job_id}/log`；下载完整资源包：`GET /api/jobs/{job_id}/file/godot_asset.zip`；下载 GLB：`GET /api/jobs/{job_id}/file/model.glb`；下载场景：`GET /api/jobs/{job_id}/file/game_asset.tscn`。
 
 ## Godot 4 导入
 
-将资源包解压到 Godot 项目的 `res://assets/generated/<资产编号>/`，Godot 自动导入 `model.glb`。使用项目提供的 `godot/AssetStudioImport.gd` EditorScript，可根据资源清单创建 `game_asset.tscn`，为静态模型制作盒形碰撞体，为角色制作基础胶囊碰撞体。
+将资源包解压到 Godot 项目的 `res://assets/generated/<资产编号>/`，Godot 会自动导入 `model.glb`。资源包内已包含 `game_asset.tscn`，可以直接添加到游戏场景。静态资产使用盒形碰撞体，角色使用基础胶囊碰撞体。
 
 资源包包含模型、质量检查报告、资产元数据、原画（若提供）及可拆分部件（若有）。骨骼动画重定向、角色战斗状态机、技能逻辑和复杂装备穿模检查在游戏工程内完成。
 

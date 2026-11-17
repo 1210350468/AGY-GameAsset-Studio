@@ -4,13 +4,13 @@ source "$(dirname "$0")/common.sh"
 
 TARGET="${1:-all}"
 case "$TARGET" in
-  all|api|anime|pixal3d|partcrafter|skintokens) ;;
-  *) echo "用法：bash scripts/install-autodl.sh [all|api|anime|pixal3d|partcrafter|skintokens]" >&2; exit 2 ;;
+  all|api|anime|pixal3d|partcrafter|skintokens|godot) ;;
+  *) echo "用法：bash scripts/install-autodl.sh [all|api|anime|pixal3d|partcrafter|skintokens|godot]" >&2; exit 2 ;;
 esac
 
 if [ "$TARGET" = all ]; then
   bash "$STUDIO_ROOT/scripts/download-models.sh" all
-  for part in api anime pixal3d partcrafter skintokens; do
+  for part in api anime pixal3d partcrafter skintokens godot; do
     bash "$STUDIO_ROOT/scripts/install-autodl.sh" "$part"
   done
   announce '所有安装步骤已经执行，开始检查 AutoDL 环境'
@@ -19,6 +19,11 @@ if [ "$TARGET" = all ]; then
 fi
 
 announce "安装模块：$TARGET"
+
+if [ "$TARGET" = godot ]; then
+  bash "$STUDIO_ROOT/scripts/install-godot.sh"
+  exit 0
+fi
 
 if [ "$TARGET" = api ]; then
   make_env api 3.11

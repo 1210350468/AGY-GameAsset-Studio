@@ -96,7 +96,7 @@ def health() -> dict:
 @app.get("/ready")
 def ready() -> dict:
     tools = pipeline.readiness()
-    required = ("anime", "pixal3d", "blender")
+    required = ("anime", "pixal3d", "blender", "godot")
     missing = [name for name in required if not tools[name]["installed"]]
     if missing:
         raise HTTPException(status_code=503, detail={"missing": missing})
@@ -165,6 +165,7 @@ async def create_job(
     else:
         ensure_tool("partcrafter")
     ensure_tool("blender")
+    ensure_tool("godot")
     if rig:
         ensure_tool("skintokens")
 
@@ -213,6 +214,7 @@ async def import_model(
     target_faces: int = Form(50000),
 ) -> dict:
     ensure_tool("blender")
+    ensure_tool("godot")
     if kind not in {"character", "monster", "weapon", "equipment", "prop", "scene"}:
         raise HTTPException(400, "资产类型无效")
     if not title.strip() or len(title) > 100 or not (1000 <= target_faces <= 500000):
@@ -253,7 +255,7 @@ def job_log(job_id: str) -> str:
 
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
-    valid_files = {"model.glb", "godot_asset.zip", "input.png", "quality.json", "manifest.json"}
+    valid_files = {"model.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "manifest.json"}
     if file_name not in valid_files:
         raise HTTPException(404, "资源类型不存在")
     path = job_dir(job_id) / file_name
