@@ -32,6 +32,9 @@ result = {
     "skins": skins,
     "joints": joints,
     "animations": len(gltf.animations),
+    "materials": len(gltf.materials),
+    "textures": len(gltf.textures),
+    "images": len(gltf.images),
     "bounds": scene.bounds.tolist(),
 }
 print(json.dumps(result, ensure_ascii=False, indent=2))
