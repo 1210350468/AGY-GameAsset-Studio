@@ -63,7 +63,7 @@
       </section>
 
       <section id="view-jobs" class="view"><div class="section-title"><h2>任务进度</h2><p>查看每个资产的实际处理阶段、运行记录与导出结果。</p></div><div id="job-list" class="stack"></div></section>
-      <section id="view-assets" class="view"><div class="section-title"><h2>资产库</h2><p>已完成模型可以预览、下载 GLB，或导出完整 Godot 资源包。</p></div><div id="asset-list" class="asset-grid"></div><div class="viewer-panel" id="viewer-panel" hidden><div class="viewer-head"><h3 id="viewer-title">3D 预览</h3><button type="button" id="viewer-close">关闭预览</button></div><div id="viewer-canvas"></div><p>鼠标拖动旋转视角，滚轮缩放模型。</p></div></section>
+      <section id="view-assets" class="view"><div class="section-title"><h2>资产库</h2><p>已完成模型可以预览、下载 GLB，或导出完整 Godot 资源包。</p></div><div id="asset-list" class="asset-grid"></div><div class="viewer-panel" id="viewer-panel" hidden><div class="viewer-head"><h3 id="viewer-title">3D 预览</h3><button type="button" id="viewer-close">关闭预览</button></div><div class="viewer-comparison"><div class="viewer-reference" id="viewer-reference"><img id="viewer-reference-image" alt="WAI 原画"><span>WAI 原画</span></div><div id="viewer-canvas"></div></div><p>鼠标拖动旋转视角，滚轮缩放模型。</p></div></section>
       <section id="view-system" class="view"><div class="section-title"><h2>模型与设备</h2><p>模型安装状态、GPU 显存和 AutoDL 数据空间。</p></div><div id="system-cards" class="system-grid"></div><div class="panel"><h3>完整工作流程</h3><ol class="steps"><li>WAI Illustrious 生成二次元原画</li><li>Pixal3D 生成完整模型，或 PartCrafter 生成拆分部件</li><li>SkinTokens 处理角色骨骼与蒙皮</li><li>Blender 优化网格、UV 与材质并导出 GLB</li><li>分析实际网格质量并制作 Godot 资源包</li></ol></div></section>
 
       <div id="notification" class="notification" role="alert" hidden></div>

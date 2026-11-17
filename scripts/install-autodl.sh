@@ -112,6 +112,8 @@ if [ "$TARGET" = pixal3d ]; then
   fi
   "$ENV_ROOT/pixal/bin/python" -m pip install --no-deps "$UTILS3D_WHEEL"
   verify_torch "$ENV_ROOT/pixal/bin/python"
+  cp "$STUDIO_ROOT/integrations/pixal3d/image_conditioned_proj.py" \
+    "$SOURCE_ROOT/Pixal3D/pixal3d/trainers/flow_matching/mixins/image_conditioned_proj.py"
   (cd "$SOURCE_ROOT/Pixal3D" && "$ENV_ROOT/pixal/bin/python" -c 'from pixal3d.pipelines import Pixal3DImageTo3DPipeline; import o_voxel; print("Pixal3D imports passed")')
   test -s "$MODEL_ROOT/Pixal3D/pipeline.json"
   touch "$INSTALL_ROOT/pixal3d"

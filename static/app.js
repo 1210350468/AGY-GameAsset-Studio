@@ -184,6 +184,7 @@ function closeViewer() {
     viewer = null;
   }
   $("#viewer-canvas").replaceChildren();
+  $("#viewer-reference-image").removeAttribute("src");
   $("#viewer-panel").hidden = true;
 }
 
@@ -193,6 +194,11 @@ async function openViewer(id, title) {
   closeViewer();
   $("#viewer-panel").hidden = false;
   $("#viewer-title").textContent = title;
+  const reference = $("#viewer-reference");
+  const referenceImage = $("#viewer-reference-image");
+  reference.hidden = false;
+  referenceImage.onerror = () => { reference.hidden = true; };
+  referenceImage.src = `/api/jobs/${id}/file/input.png`;
   $("#viewer-panel").scrollIntoView({behavior: "smooth", block: "nearest"});
   const container = $("#viewer-canvas");
   const scene = new THREE.Scene();

@@ -134,8 +134,13 @@ class AssetPipeline:
                     )
 
                 if job["mode"] == "whole":
+                    require_gpu_headroom(settings)
                     self._stage(job_id, "Pixal3D 重建与材质生成", 0.35)
                     generated = job_dir / "generated.glb"
+                    naf_repo = settings.sources / "NAF"
+                    checkpoint = settings.data_root / "cache" / "torch" / "hub" / "checkpoints" / "naf_release.pth"
+                    if not (naf_repo / "hubconf.py").is_file() or not checkpoint.is_file():
+                        raise FileNotFoundError("Pixal3D 所需的 NAF 源码或权重缺失")
                     args = [
                         str(settings.pixal_python), "inference.py", "--image", str(concept),
                         "--output", str(generated), "--seed", str(params["seed"]),
@@ -147,6 +152,7 @@ class AssetPipeline:
                         args.extend(["--resolution", "1536"])
                     self._command(args, cwd=settings.pixal_repo, log=log, env={"ATTN_BACKEND": "sdpa"})
                 elif job["mode"] == "parts":
+                    require_gpu_headroom(settings)
                     self._stage(job_id, "PartCrafter 分部件建模", 0.35)
                     output_root = job_dir / "partcrafter"
                     args = [
