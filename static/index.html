@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AGY 游戏资产工作台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-icon">A</span><div><strong>AGY 资产工坊</strong><small>GAME ASSET STUDIO</small></div></div>
+      <nav aria-label="工作台导航">
+        <button class="nav-item active" data-view="create">✦ &nbsp;资产制作</button>
+        <button class="nav-item" data-view="jobs">◷ &nbsp;任务进度 <span id="job-count">0</span></button>
+        <button class="nav-item" data-view="assets">▣ &nbsp;资产库</button>
+        <button class="nav-item" data-view="system">⚙ &nbsp;模型与设备</button>
+      </nav>
+      <div class="sidebar-footer"><span id="connection-dot" class="status-dot"></span><span id="connection-text">连接中</span><small>AutoDL / 本地 SSH 隧道</small></div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar"><div><span class="eyebrow">AI GAME PRODUCTION</span><h1 id="page-title">制作游戏资产</h1></div><span class="topmark" id="gpu-badge">检查 GPU 中</span></header>
+
+      <section id="view-create" class="view active">
+        <div class="intro"><h2>你想制作什么？</h2><p>输入创作描述或上传参考图片，系统会根据资产类型自动制作模型、材质及资源包。</p></div>
+        <form id="create-form" class="panel" enctype="multipart/form-data">
+          <label class="form-label" for="asset-title">资产名称</label>
+          <input id="asset-title" name="title" required maxlength="100" placeholder="例如：冰霜骑士 · 精英怪物">
+
+          <label class="form-label" for="asset-kind">资产类型</label>
+          <div class="type-grid" id="kind-grid">
+            <button type="button" class="type-choice selected" data-kind="character">🧙 <span>角色</span></button>
+            <button type="button" class="type-choice" data-kind="monster">🐲 <span>怪物</span></button>
+            <button type="button" class="type-choice" data-kind="weapon">⚔️ <span>武器</span></button>
+            <button type="button" class="type-choice" data-kind="equipment">🛡️ <span>装备</span></button>
+            <button type="button" class="type-choice" data-kind="prop">📦 <span>道具</span></button>
+            <button type="button" class="type-choice" data-kind="scene">🏰 <span>场景</span></button>
+          </div>
+          <input type="hidden" name="kind" id="asset-kind" value="character">
+
+          <label class="form-label" for="asset-prompt">创作描述</label>
+          <textarea id="asset-prompt" name="prompt" rows="4" maxlength="3000" placeholder="角色造型、武器、配色和材质。例如：奇幻动漫风格的冰霜骑士，蓝色重甲、白色短发、双手符文巨剑，完整角色，明亮柔和的游戏美术。"></textarea>
+
+          <label class="form-label" for="asset-image">参考图片 <span class="optional">上传图片即可直接进入 3D 建模</span></label>
+          <label class="upload" for="asset-image"><span class="upload-icon">＋</span><span id="upload-text">选择角色原画、装备图片或怪物设定图</span><small>PNG / JPG / WEBP，最多 25MB</small></label>
+          <input id="asset-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          <div id="image-preview-wrap" class="image-preview" hidden><img id="image-preview" alt="参考图片预览"><button type="button" id="clear-image">删除图片</button></div>
+
+          <div class="two-col">
+            <div><label class="form-label" for="model-mode">建模方式</label><select name="mode" id="model-mode"><option value="whole">完整模型 · Pixal3D</option><option value="parts">可拆分部件 · PartCrafter</option></select></div>
+            <div><label class="form-label" for="target-faces">目标三角面</label><input type="number" name="target_faces" id="target-faces" min="1000" max="500000" value="50000"></div>
+          </div>
+
+          <label class="check"><input type="checkbox" id="rig" name="rig" checked><span><strong>生成骨骼与蒙皮</strong><small>适用于角色和怪物，由 SkinTokens 处理</small></span></label>
+
+          <details class="advanced"><summary>高级参数</summary><div class="two-col"><div><label class="form-label" for="num-parts">部件数量</label><input type="number" name="num_parts" id="num-parts" value="3" min="1" max="16"></div><div><label class="form-label" for="seed">随机种子</label><input type="number" name="seed" id="seed" value="42" min="0" max="4294967295"></div><div><label class="form-label" for="image-steps">原画采样步数</label><input type="number" name="image_steps" id="image-steps" value="30" min="1" max="80"></div></div></details>
+          <button class="primary" id="submit-job" type="submit">✦ &nbsp;开始制作资产</button>
+          <p class="form-footnote">WAI Illustrious v17 → Pixal3D / PartCrafter → SkinTokens → Blender → Godot GLB</p>
+        </form>
+
+        <details class="import-panel"><summary>已有 GLB 模型？直接优化并制作游戏资源包</summary><form id="import-form"><label class="form-label" for="import-title">资产名称</label><input id="import-title" name="title" required placeholder="现有模型名称"><label class="form-label" for="import-file">GLB 文件</label><input id="import-file" type="file" name="file" required accept=".glb"><button class="secondary" type="submit">导入并优化模型</button></form></details>
+      </section>
+
+      <section id="view-jobs" class="view"><div class="section-title"><h2>任务进度</h2><p>查看每个资产的实际处理阶段、运行记录与导出结果。</p></div><div id="job-list" class="stack"></div></section>
+      <section id="view-assets" class="view"><div class="section-title"><h2>资产库</h2><p>已完成模型可以预览、下载 GLB，或导出完整 Godot 资源包。</p></div><div id="asset-list" class="asset-grid"></div><div class="viewer-panel" id="viewer-panel" hidden><div class="viewer-head"><h3 id="viewer-title">3D 预览</h3><button type="button" id="viewer-close">关闭预览</button></div><div id="viewer-canvas"></div><p>鼠标拖动旋转视角，滚轮缩放模型。</p></div></section>
+      <section id="view-system" class="view"><div class="section-title"><h2>模型与设备</h2><p>模型安装状态、GPU 显存和 AutoDL 数据空间。</p></div><div id="system-cards" class="system-grid"></div><div class="panel"><h3>完整工作流程</h3><ol class="steps"><li>WAI Illustrious 生成二次元原画</li><li>Pixal3D 生成完整模型，或 PartCrafter 生成拆分部件</li><li>SkinTokens 处理角色骨骼与蒙皮</li><li>Blender 优化网格、UV 与材质并导出 GLB</li><li>分析实际网格质量并制作 Godot 资源包</li></ol></div></section>
+
+      <div id="notification" class="notification" role="alert" hidden></div>
+    </main>
+  </div>
+  <script type="module" src="/app.bundle.js"></script>
+</body>
+</html>
+

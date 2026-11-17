@@ -1,0 +1,111 @@
+set -euo pipefail
+
+source "$(dirname "$0")/common.sh"
+
+TARGET="${1:-all}"
+case "$TARGET" in
+  all|api|anime|pixal3d|partcrafter|skintokens) ;;
+  *) echo "用法：bash scripts/install-autodl.sh [all|api|anime|pixal3d|partcrafter|skintokens]" >&2; exit 2 ;;
+esac
+
+if [ "$TARGET" = all ]; then
+  for part in api anime pixal3d partcrafter skintokens; do
+    bash "$STUDIO_ROOT/scripts/install-autodl.sh" "$part"
+  done
+  announce '所有安装步骤已经执行，开始检查 AutoDL 环境'
+  bash "$STUDIO_ROOT/scripts/doctor.sh"
+  exit 0
+fi
+
+announce "安装模块：$TARGET"
+
+if [ "$TARGET" = api ]; then
+  make_env api 3.11
+  "$ENV_ROOT/api/bin/python" -m pip install --upgrade pip setuptools wheel
+  "$ENV_ROOT/api/bin/python" -m pip install -e "$STUDIO_ROOT"
+  "$ENV_ROOT/api/bin/python" -c 'from asset_studio.api import app; print(app.title)'
+  touch "$INSTALL_ROOT/api"
+  exit 0
+fi
+
+if [ "$TARGET" = anime ]; then
+  make_env anime 3.11
+  get_repo https://github.com/Comfy-Org/ComfyUI.git "$SOURCE_ROOT/ComfyUI"
+  "$ENV_ROOT/anime/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+  "$ENV_ROOT/anime/bin/python" -m pip install -r "$SOURCE_ROOT/ComfyUI/requirements.txt"
+  "$ENV_ROOT/anime/bin/python" -m pip install "huggingface_hub[hf_xet]"
+  "$ENV_ROOT/anime/bin/hf" download IbarakiDouji/WAI-NSFW-illustrious-SDXL "$MODEL_CHECKPOINT" \
+    --local-dir "$SOURCE_ROOT/ComfyUI/models/checkpoints"
+  test -s "$SOURCE_ROOT/ComfyUI/models/checkpoints/$MODEL_CHECKPOINT"
+  verify_torch "$ENV_ROOT/anime/bin/python"
+  touch "$INSTALL_ROOT/anime"
+  exit 0
+fi
+
+if [ "$TARGET" = pixal3d ]; then
+  command -v nvcc >/dev/null 2>&1 || { echo 'Pixal3D 扩展需要 CUDA Toolkit nvcc，建议使用 CUDA 12.4 的 AutoDL 镜像。' >&2; exit 1; }
+  command -v apt-get >/dev/null 2>&1 || { echo '需要可安装依赖的 Ubuntu AutoDL 容器。' >&2; exit 1; }
+  apt-get update
+  apt-get install -y build-essential libjpeg-dev libgl1 libglib2.0-0 libegl1 libglu1-mesa
+  make_env pixal 3.10
+  get_repo https://github.com/microsoft/TRELLIS.2.git "$SOURCE_ROOT/TRELLIS.2"
+  get_repo https://github.com/TencentARC/Pixal3D.git "$SOURCE_ROOT/Pixal3D"
+  "$ENV_ROOT/pixal/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+  "$ENV_ROOT/pixal/bin/python" -m pip install --upgrade setuptools wheel ninja packaging
+  "$ENV_ROOT/pixal/bin/python" -m pip install imageio imageio-ffmpeg tqdm easydict opencv-python-headless \
+    trimesh transformers gradio==6.0.1 tensorboard pandas lpips zstandard \
+    kornia timm
+  "$ENV_ROOT/pixal/bin/python" -m pip install \
+    git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
+  "$ENV_ROOT/pixal/bin/python" -m pip install -r "$SOURCE_ROOT/Pixal3D/requirements.txt"
+
+  get_repo https://github.com/NVlabs/nvdiffrast.git "$SOURCE_ROOT/nvdiffrast" v0.4.0
+  get_repo https://github.com/JeffreyXiang/nvdiffrec.git "$SOURCE_ROOT/nvdiffrec" renderutils
+  get_repo https://github.com/JeffreyXiang/CuMesh.git "$SOURCE_ROOT/CuMesh"
+  get_repo https://github.com/JeffreyXiang/FlexGEMM.git "$SOURCE_ROOT/FlexGEMM"
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/nvdiffrast"
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/nvdiffrec"
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/CuMesh"
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/FlexGEMM"
+  "$ENV_ROOT/pixal/bin/python" -m pip install --no-build-isolation "$SOURCE_ROOT/TRELLIS.2/o-voxel"
+  "$ENV_ROOT/pixal/bin/python" -m pip install flash-attn==2.7.3 --no-build-isolation
+
+  export NATTEN_CUDA_ARCH="${NATTEN_CUDA_ARCH:-8.9}"
+  export NATTEN_N_WORKERS="${NATTEN_N_WORKERS:-4}"
+  "$ENV_ROOT/pixal/bin/python" -m pip install natten==0.21.0 --no-build-isolation
+  "$ENV_ROOT/pixal/bin/python" -m pip install \
+    https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl
+  verify_torch "$ENV_ROOT/pixal/bin/python"
+  (cd "$SOURCE_ROOT/Pixal3D" && "$ENV_ROOT/pixal/bin/python" -c 'from pixal3d.pipelines import Pixal3DImageTo3DPipeline; import o_voxel; print("Pixal3D imports passed")')
+  touch "$INSTALL_ROOT/pixal3d"
+  exit 0
+fi
+
+if [ "$TARGET" = partcrafter ]; then
+  apt-get update
+  apt-get install -y libegl1 libegl1-mesa libgl1-mesa-dev libgl1 libglib2.0-0
+  make_env parts 3.11
+  get_repo https://github.com/wgsxm/PartCrafter.git "$SOURCE_ROOT/PartCrafter"
+  "$ENV_ROOT/parts/bin/python" -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+  "$ENV_ROOT/parts/bin/python" -m pip install torch-cluster -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
+  "$ENV_ROOT/parts/bin/python" -m pip install -r "$SOURCE_ROOT/PartCrafter/settings/requirements.txt"
+  verify_torch "$ENV_ROOT/parts/bin/python"
+  (cd "$SOURCE_ROOT/PartCrafter" && "$ENV_ROOT/parts/bin/python" -c 'from src.pipelines.pipeline_partcrafter import PartCrafterPipeline; print("PartCrafter imports passed")')
+  touch "$INSTALL_ROOT/partcrafter"
+  exit 0
+fi
+
+if [ "$TARGET" = skintokens ]; then
+  command -v nvcc >/dev/null 2>&1 || { echo 'SkinTokens 扩展需要 CUDA Toolkit nvcc。' >&2; exit 1; }
+  make_env rig 3.11
+  get_repo https://github.com/VAST-AI-Research/SkinTokens.git "$SOURCE_ROOT/SkinTokens"
+  "$ENV_ROOT/rig/bin/python" -m pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+  "$ENV_ROOT/rig/bin/python" -m pip install --upgrade pip setuptools wheel ninja packaging
+  "$ENV_ROOT/rig/bin/python" -m pip install -r "$SOURCE_ROOT/SkinTokens/requirements.txt"
+  "$ENV_ROOT/rig/bin/python" -m pip install flash-attn --no-build-isolation
+  (cd "$SOURCE_ROOT/SkinTokens" && "$ENV_ROOT/rig/bin/python" download.py --model)
+  verify_torch "$ENV_ROOT/rig/bin/python"
+  touch "$INSTALL_ROOT/skintokens"
+  exit 0
+fi
+

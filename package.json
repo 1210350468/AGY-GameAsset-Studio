@@ -1,0 +1,14 @@
+{
+  "name": "agy-game-asset-studio-web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build:web": "esbuild static/app.js --bundle --format=esm --target=es2020 --outfile=static/app.bundle.js --minify"
+  },
+  "dependencies": {
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}
