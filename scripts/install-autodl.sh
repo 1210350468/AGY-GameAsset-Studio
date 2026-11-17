@@ -30,13 +30,21 @@ fi
 
 if [ "$TARGET" = anime ]; then
   make_env anime 3.11
-  get_repo https://github.com/Comfy-Org/ComfyUI.git "$SOURCE_ROOT/ComfyUI" master
+  get_repo https://github.com/Comfy-Org/ComfyUI.git "$SOURCE_ROOT/ComfyUI-v0.29.2" v0.29.2 tags
   "$ENV_ROOT/anime/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
-  "$ENV_ROOT/anime/bin/python" -m pip install -r "$SOURCE_ROOT/ComfyUI/requirements.txt"
+  "$ENV_ROOT/anime/bin/python" -m pip install -r "$SOURCE_ROOT/ComfyUI-v0.29.2/requirements.txt"
   "$ENV_ROOT/anime/bin/python" -m pip install "huggingface_hub[hf_xet]"
-  "$ENV_ROOT/anime/bin/hf" download IbarakiDouji/WAI-NSFW-illustrious-SDXL "$MODEL_CHECKPOINT" \
-    --local-dir "$SOURCE_ROOT/ComfyUI/models/checkpoints"
-  test -s "$SOURCE_ROOT/ComfyUI/models/checkpoints/$MODEL_CHECKPOINT"
+  mkdir -p "$SOURCE_ROOT/ComfyUI-v0.29.2/models/checkpoints"
+  if [ ! -s "$SOURCE_ROOT/ComfyUI-v0.29.2/models/checkpoints/$MODEL_CHECKPOINT" ]; then
+    if [ -s "$SOURCE_ROOT/ComfyUI/models/checkpoints/$MODEL_CHECKPOINT" ]; then
+      ln -s "$SOURCE_ROOT/ComfyUI/models/checkpoints/$MODEL_CHECKPOINT" \
+        "$SOURCE_ROOT/ComfyUI-v0.29.2/models/checkpoints/$MODEL_CHECKPOINT"
+    else
+      "$ENV_ROOT/anime/bin/hf" download IbarakiDouji/WAI-NSFW-illustrious-SDXL "$MODEL_CHECKPOINT" \
+        --local-dir "$SOURCE_ROOT/ComfyUI-v0.29.2/models/checkpoints"
+    fi
+  fi
+  test -s "$SOURCE_ROOT/ComfyUI-v0.29.2/models/checkpoints/$MODEL_CHECKPOINT"
   verify_torch "$ENV_ROOT/anime/bin/python"
   touch "$INSTALL_ROOT/anime"
   exit 0

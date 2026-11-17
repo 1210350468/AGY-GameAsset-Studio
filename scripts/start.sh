@@ -7,7 +7,7 @@ test -x "$ENV_ROOT/api/bin/python" || { echo '请先运行 bash scripts/install-
 if [ -f "$INSTALL_ROOT/anime" ]; then
   if ! curl -fsS --max-time 3 'http://127.0.0.1:8188/system_stats' >/dev/null; then
     announce '启动本地 ComfyUI'
-    nohup "$ENV_ROOT/anime/bin/python" "$SOURCE_ROOT/ComfyUI/main.py" \
+    nohup "$ENV_ROOT/anime/bin/python" "$SOURCE_ROOT/ComfyUI-v0.29.2/main.py" \
       --listen 127.0.0.1 --port 8188 --disable-auto-launch \
       > "$DATA_ROOT/logs/comfyui.log" 2>&1 < /dev/null &
     echo "$!" > "$DATA_ROOT/comfyui.pid"

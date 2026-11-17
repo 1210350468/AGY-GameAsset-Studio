@@ -47,7 +47,7 @@ class Settings:
 
     @property
     def image_checkpoint(self) -> Path:
-        return self.sources / "ComfyUI" / "models" / "checkpoints" / self.checkpoint
+        return self.sources / "ComfyUI-v0.29.2" / "models" / "checkpoints" / self.checkpoint
 
     @property
     def pixal_repo(self) -> Path:

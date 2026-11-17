@@ -27,7 +27,7 @@ if ($listener) {
     Stop-Process -Id $listener.OwningProcess -Force
 }
 
-& $ssh -T -n -o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 $remote "cd $remoteProject && bash scripts/start.sh"
+& $ssh -T -n -o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 $remote "curl -fsS --max-time 5 http://127.0.0.1:18333/health > /dev/null || (cd $remoteProject && bash scripts/start.sh)"
 if ($LASTEXITCODE -ne 0) {
     throw "Cannot start the asset studio on xmu21."
 }

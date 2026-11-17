@@ -59,7 +59,7 @@ class AssetPipeline:
 
     def readiness(self) -> dict[str, Any]:
         settings = self.settings
-        comfy_path = settings.sources / "ComfyUI" / "main.py"
+        comfy_path = settings.sources / "ComfyUI-v0.29.2" / "main.py"
         completed = settings.data_root / "installed"
         return {
             "anime": {"model": settings.checkpoint, "installed": settings.image_checkpoint.is_file() and comfy_path.is_file() and (completed / "anime").is_file()},

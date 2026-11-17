@@ -6,7 +6,6 @@ New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
 
 Copy-Item -Force (Join-Path $projectRoot 'skill\SKILL.md') (Join-Path $skillRoot 'SKILL.md')
 Copy-Item -Force (Join-Path $PSScriptRoot 'Start-XMU21-Asset-Studio.ps1') (Join-Path $skillRoot 'Start-XMU21-Asset-Studio.ps1')
-Copy-Item -Force (Join-Path $PSScriptRoot 'Watch-XMU21-Asset-Studio.ps1') (Join-Path $skillRoot 'Watch-XMU21-Asset-Studio.ps1')
 Copy-Item -Force (Join-Path $PSScriptRoot 'Register-XMU21-Asset-Studio.ps1') (Join-Path $skillRoot 'Register-XMU21-Asset-Studio.ps1')
 
 Write-Output "AGY game asset studio skill installed: $skillRoot"

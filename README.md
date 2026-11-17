@@ -13,7 +13,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File windows/Install-AGY-Skill.ps
 powershell -NoProfile -ExecutionPolicy Bypass -File windows/Register-XMU21-Asset-Studio.ps1
 ```
 
-它会注册 Windows 计划任务，自动建立 `127.0.0.1:18333` 到 xmu21 的 SSH 隧道，并在连接中断后重新连接。原先指向 xmu85 的计划任务应保持禁用。
+它会注册每分钟运行的 Windows 计划任务，自动建立 `127.0.0.1:18333` 到 xmu21 的 SSH 隧道，并在连接中断后重新连接。原先指向 xmu85 的计划任务应保持禁用。
+
+xmu21 上的二次元原画服务使用 ComfyUI v0.29.2，兼容已验证的 PyTorch 2.6.0 CUDA 环境。安装脚本会复用此前下载的 WAI Illustrious v17 权重。
 
 xmu21 使用以下配置安装：
 

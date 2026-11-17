@@ -28,7 +28,7 @@ Windows 用户使用 `http://127.0.0.1:18333` 访问 xmu21 上的工作台。
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.gemini\config\skills\game-asset-studio\Start-XMU21-Asset-Studio.ps1"
 ```
 
-Windows 计划任务 `AGY Game Asset Studio Tunnel` 每 30 秒检查连接并自动重新建立 SSH 隧道。
+Windows 计划任务 `AGY Game Asset Studio Tunnel` 每分钟检查连接并自动重新建立 SSH 隧道。
 
 ## 生成模式
 
