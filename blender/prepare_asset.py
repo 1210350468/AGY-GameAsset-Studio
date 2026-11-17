@@ -41,10 +41,6 @@ if total_triangles > arguments.target_faces:
         obj.modifiers.move(len(obj.modifiers) - 1, 0)
         bpy.ops.object.modifier_apply(modifier=modifier.name)
 
-output_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
-if output_triangles > arguments.target_faces * 1.05:
-    raise RuntimeError(f"模型超过面数要求：{output_triangles} > {arguments.target_faces}")
-
 for obj in meshes:
     if not obj.data.uv_layers:
         bpy.ops.object.select_all(action="DESELECT")
@@ -54,6 +50,13 @@ for obj in meshes:
         bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.uv.smart_project(island_margin=0.02)
         bpy.ops.object.mode_set(mode="OBJECT")
+
+    obj.data.validate()
+    obj.data.update()
+
+output_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
+if output_triangles > arguments.target_faces * 1.05:
+    raise RuntimeError(f"模型超过面数要求：{output_triangles} > {arguments.target_faces}")
 
 bpy.ops.object.select_all(action="SELECT")
 bpy.ops.export_scene.gltf(filepath=str(destination), export_format="GLB", export_yup=True)

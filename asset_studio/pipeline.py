@@ -92,6 +92,9 @@ class AssetPipeline:
         command_environment["TMPDIR"] = str(self.settings.data_root / "scratch")
         command_environment["TMP"] = command_environment["TMPDIR"]
         command_environment["TEMP"] = command_environment["TMPDIR"]
+        command_environment["TORCH_HOME"] = str(self.settings.data_root / "cache" / "torch")
+        command_environment["HF_HOME"] = str(self.settings.data_root / "cache" / "huggingface")
+        command_environment["PYTHONUNBUFFERED"] = "1"
         (self.settings.data_root / "scratch").mkdir(exist_ok=True)
         if env:
             command_environment.update(env)
