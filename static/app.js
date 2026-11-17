@@ -110,10 +110,11 @@ async function refreshJobs() {
     return `<article class="job-card">
       <div class="job-head"><strong>${escapeHtml(job.title)}</strong><span class="label-state ${escapeHtml(job.status)}">${status}</span></div>
       <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
+      ${job.mode !== "import" && !["queued", "生成二次元原画"].includes(job.stage) ? `<a class="job-concept-link" href="${fileUrl}input.png" target="_blank" rel="noopener noreferrer"><img src="${fileUrl}input.png" alt="${escapeHtml(job.title)} 原画" loading="lazy" onerror="this.parentElement.hidden=true"></a>` : ""}
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}
       <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button>
-      ${job.status === "completed" ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><button class="link-btn" data-preview="${job.id}" data-title="${escapeHtml(job.title)}">3D 预览</button>` : ""}
+      ${job.status === "completed" ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a>` : ""}
       ${["failed", "completed"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
     </article>`;
   }).join("") : `<div class="panel muted">目前还没有资产任务，可以从「资产制作」开始。</div>`;
@@ -126,7 +127,7 @@ async function refreshAssets() {
     const url = `/api/jobs/${asset.id}/file/`;
     return `<article class="asset-card"><div class="asset-thumb"><img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}" onerror="this.hidden=true"></div>
     <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${escapeHtml(types[asset.kind] ?? asset.kind)} · ${escapeHtml(asset.created_at.slice(0, 10))}</p>
-      <div class="asset-actions"><button class="link-btn" data-preview="${asset.id}" data-title="${escapeHtml(asset.title)}">预览模型</button><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a></div></div></article>`;
+      <div class="asset-actions"><a class="link-btn" href="/?asset=${asset.id}">预览模型</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a></div></div></article>`;
   }).join("") : `<div class="panel muted">已完成的资产会自动出现在这里。</div>`;
 }
 
@@ -251,4 +252,17 @@ async function tick() {
 
 tick();
 setInterval(tick, 4000);
+
+const requestedAsset = new URLSearchParams(window.location.search).get("asset");
+if (requestedAsset && /^[0-9a-f]{32}$/.test(requestedAsset)) {
+  api(`/api/jobs/${requestedAsset}`).then(async (job) => {
+    if (job.status === "completed") {
+      navigate("assets");
+      await openViewer(job.id, job.title);
+    } else {
+      navigate("jobs");
+      notify(`${job.title}：${job.stage}，完成后可以查看 3D 模型`, 9000);
+    }
+  }).catch((error) => notify(`无法打开资产：${error.message}`, 9000));
+}
 
