@@ -143,6 +143,7 @@ async function refreshSystem() {
   });
   cards.push(`<article class="system-card"><h3>GPU 与资源</h3><p>${info.gpu.available ? info.gpu.devices.map((device) => `${escapeHtml(device.name)}，空闲显存 ${device.memory_free_mib} MiB`).join("<br>") : escapeHtml(info.gpu.reason || "尚未检测到 GPU")}</p><p>数据盘剩余 ${info.storage.free_gb} GB</p></article>`);
   cards.push(`<article class="system-card"><h3>CUDA 驱动</h3><p class="${info.cuda.ready ? "status-good" : "status-bad"}">${escapeHtml(info.cuda.diagnostic)}</p></article>`);
+  cards.push(`<article class="system-card"><h3>模型运行资源</h3><p class="${info.gpu_headroom.ready ? "status-good" : "status-bad"}">${info.gpu_headroom.ready ? "可以开始模型推理" : `GPU ${escapeHtml(info.gpu_headroom.gpu)} 正在执行其他任务`}</p>${info.gpu_headroom.required_mib ? `<p>空闲 ${info.gpu_headroom.free_mib} MiB / 预留 ${info.gpu_headroom.required_mib} MiB</p>` : ""}</article>`);
   $("#system-cards").innerHTML = cards.join("");
 }
 

@@ -15,6 +15,7 @@ from PIL import Image, ImageOps
 import trimesh
 
 from asset_studio.pipeline import AssetPipeline
+from asset_studio.gpu import memory_headroom, require_gpu_headroom
 from asset_studio.settings import Settings
 
 
@@ -105,7 +106,10 @@ def ready() -> dict:
     cuda = cuda_info()
     if not cuda["ready"]:
         raise HTTPException(status_code=503, detail={"cuda": cuda})
-    return {"status": "installed", "models": tools, "gpu": gpu, "cuda": cuda}
+    memory = memory_headroom(settings)
+    if not memory["ready"]:
+        raise HTTPException(status_code=503, detail={"gpu_headroom": memory})
+    return {"status": "installed", "models": tools, "gpu": gpu, "cuda": cuda, "gpu_headroom": memory}
 
 
 @app.get("/api/system")
@@ -115,6 +119,7 @@ def system() -> dict:
         "software": pipeline.readiness(),
         "gpu": gpu_info(),
         "cuda": cuda_info(),
+        "gpu_headroom": memory_headroom(settings),
         "storage": {"path": str(settings.data_root), "free_gb": round(disk.free / (1024 ** 3), 1)},
         "queue_length": pipeline.jobs.qsize(),
     }
@@ -187,6 +192,10 @@ async def create_job(
     cuda = cuda_info()
     if not cuda["ready"]:
         raise HTTPException(503, cuda["diagnostic"])
+    try:
+        require_gpu_headroom(settings)
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from error
 
     params = {
         "prompt": prompt.strip(), "rig": rig, "num_parts": num_parts,

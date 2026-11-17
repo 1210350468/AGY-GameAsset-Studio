@@ -30,7 +30,7 @@ fi
 
 if [ "$TARGET" = anime ]; then
   make_env anime 3.11
-  get_repo https://github.com/Comfy-Org/ComfyUI.git "$SOURCE_ROOT/ComfyUI"
+  get_repo https://github.com/Comfy-Org/ComfyUI.git "$SOURCE_ROOT/ComfyUI" master
   "$ENV_ROOT/anime/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
   "$ENV_ROOT/anime/bin/python" -m pip install -r "$SOURCE_ROOT/ComfyUI/requirements.txt"
   "$ENV_ROOT/anime/bin/python" -m pip install "huggingface_hub[hf_xet]"
@@ -44,22 +44,26 @@ fi
 
 if [ "$TARGET" = pixal3d ]; then
   command -v nvcc >/dev/null 2>&1 || { echo 'Pixal3D 扩展需要 CUDA Toolkit nvcc，建议使用 CUDA 12.4 的 AutoDL 镜像。' >&2; exit 1; }
-  command -v apt-get >/dev/null 2>&1 || { echo '需要可安装依赖的 Ubuntu AutoDL 容器。' >&2; exit 1; }
-  apt-get update
-  apt-get install -y build-essential libjpeg-dev libgl1 libglib2.0-0 libegl1 libglu1-mesa
+  if [ "$(id -u)" = 0 ]; then
+    apt-get update
+    apt-get install -y build-essential libjpeg-dev libgl1 libglib2.0-0 libegl1 libglu1-mesa
+  else
+    test -f /usr/include/jpeglib.h || { echo '缺少 libjpeg-dev 头文件。' >&2; exit 1; }
+    ldconfig -p | grep -q libEGL.so.1 || { echo '缺少 EGL 运行库。' >&2; exit 1; }
+  fi
   make_env pixal 3.10
   get_repo https://github.com/microsoft/TRELLIS.2.git "$SOURCE_ROOT/TRELLIS.2"
-  get_repo https://github.com/TencentARC/Pixal3D.git "$SOURCE_ROOT/Pixal3D"
+  get_repo https://github.com/TencentARC/Pixal3D.git "$SOURCE_ROOT/Pixal3D" master
+  get_repo https://github.com/microsoft/MoGe.git "$SOURCE_ROOT/MoGe"
   "$ENV_ROOT/pixal/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
   "$ENV_ROOT/pixal/bin/python" -m pip install --upgrade setuptools wheel ninja packaging
   "$ENV_ROOT/pixal/bin/python" -m pip install imageio imageio-ffmpeg tqdm easydict opencv-python-headless \
     trimesh transformers gradio==6.0.1 tensorboard pandas lpips zstandard \
     kornia timm
-  "$ENV_ROOT/pixal/bin/python" -m pip install \
-    git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
-  "$ENV_ROOT/pixal/bin/python" -m pip install -r "$SOURCE_ROOT/Pixal3D/requirements.txt"
+  "$ENV_ROOT/pixal/bin/python" -m pip install "$SOURCE_ROOT/MoGe"
+  "$ENV_ROOT/pixal/bin/python" -m pip install -r "$STUDIO_ROOT/requirements/pixal3d.txt"
 
-  get_repo https://github.com/NVlabs/nvdiffrast.git "$SOURCE_ROOT/nvdiffrast" v0.4.0
+  get_repo https://github.com/NVlabs/nvdiffrast.git "$SOURCE_ROOT/nvdiffrast" v0.4.0 tags
   get_repo https://github.com/JeffreyXiang/nvdiffrec.git "$SOURCE_ROOT/nvdiffrec" renderutils
   get_repo https://github.com/JeffreyXiang/CuMesh.git "$SOURCE_ROOT/CuMesh"
   get_repo https://github.com/JeffreyXiang/FlexGEMM.git "$SOURCE_ROOT/FlexGEMM"
@@ -82,8 +86,12 @@ if [ "$TARGET" = pixal3d ]; then
 fi
 
 if [ "$TARGET" = partcrafter ]; then
-  apt-get update
-  apt-get install -y libegl1 libegl1-mesa libgl1-mesa-dev libgl1 libglib2.0-0
+  if [ "$(id -u)" = 0 ]; then
+    apt-get update
+    apt-get install -y libegl1 libegl1-mesa libgl1-mesa-dev libgl1 libglib2.0-0
+  else
+    ldconfig -p | grep -q libEGL.so.1 || { echo '缺少 EGL 运行库。' >&2; exit 1; }
+  fi
   make_env parts 3.11
   get_repo https://github.com/wgsxm/PartCrafter.git "$SOURCE_ROOT/PartCrafter"
   "$ENV_ROOT/parts/bin/python" -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
@@ -99,7 +107,7 @@ if [ "$TARGET" = skintokens ]; then
   command -v nvcc >/dev/null 2>&1 || { echo 'SkinTokens 扩展需要 CUDA Toolkit nvcc。' >&2; exit 1; }
   make_env rig 3.11
   get_repo https://github.com/VAST-AI-Research/SkinTokens.git "$SOURCE_ROOT/SkinTokens"
-  "$ENV_ROOT/rig/bin/python" -m pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+  "$ENV_ROOT/rig/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
   "$ENV_ROOT/rig/bin/python" -m pip install --upgrade pip setuptools wheel ninja packaging
   "$ENV_ROOT/rig/bin/python" -m pip install -r "$SOURCE_ROOT/SkinTokens/requirements.txt"
   "$ENV_ROOT/rig/bin/python" -m pip install flash-attn --no-build-isolation

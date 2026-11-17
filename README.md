@@ -1,6 +1,32 @@
 # AGY 游戏资产工作台
 
-中文游戏资产生产工作台，部署在 AutoDL GPU 实例中，供浏览器和 AGY 通过统一 HTTP API 提交任务。采用一套二次元图像模型、主力 3D 模型、可拆分部件模型、自动骨骼模型和 Blender，实现从原画到 Godot 资源包的制作流程。
+中文游戏资产生产工作台，部署在 xmu21 A800 或 AutoDL GPU 实例中，供浏览器和 AGY 通过统一 HTTP API 提交任务。采用一套二次元图像模型、主力 3D 模型、可拆分部件模型、自动骨骼模型和 Blender，实现从原画到 Godot 资源包的制作流程。
+
+## xmu21 A800 现用部署
+
+项目目录：`/data/xmu/ym/services/AGY-GameAsset-Studio`，模型、环境、数据与日志目录：`/data/xmu/ym/asset-studio-data`。
+
+在已经配置 `xmu21-a800` SSH 别名的 Windows 计算机上，可以运行以下工作台自动连接脚本：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File windows/Register-XMU21-Asset-Studio.ps1
+```
+
+它会注册 Windows 计划任务，自动建立 `127.0.0.1:18333` 到 xmu21 的 SSH 隧道，并在连接中断后重新连接。原先指向 xmu85 的计划任务应保持禁用。
+
+xmu21 使用以下配置安装：
+
+```bash
+cd /data/xmu/ym/services/AGY-GameAsset-Studio
+cp .env.xmu21.example .env
+bash scripts/install-blender.sh
+bash scripts/install-autodl.sh all
+bash scripts/start.sh
+```
+
+服务器中已经配置 CUDA 12.4 和 `uv`，不需要 sudo 权限即可建立 Python 环境。所有模型源码通过 GitHub 官方归档包安装，减少 Git 传输长时间挂起的问题。`HF_ENDPOINT` 指向 Hugging Face 镜像。
+
+为了保护同时执行的科研任务，xmu21 配置会在所选 GPU 空闲显存达到 50,000 MiB 后允许新的模型推理；这个限制对已有 GLB 文件的 Blender 优化与导出没有影响。
 
 ## 模型与工具
 

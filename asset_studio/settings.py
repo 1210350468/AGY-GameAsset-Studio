@@ -16,6 +16,7 @@ class Settings:
     pixal_low_vram: bool
     blender: str
     timeout_seconds: int
+    min_free_gpu_mib: int = 0
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -29,6 +30,7 @@ class Settings:
             pixal_low_vram=os.environ.get("ASSET_STUDIO_PIXAL_LOW_VRAM", "1") == "1",
             blender=os.environ.get("ASSET_STUDIO_BLENDER", "blender"),
             timeout_seconds=int(os.environ.get("ASSET_STUDIO_TIMEOUT_SECONDS", "7200")),
+            min_free_gpu_mib=int(os.environ.get("ASSET_STUDIO_MIN_GPU_FREE_MIB", "0")),
         )
 
     @property

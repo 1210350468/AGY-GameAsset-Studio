@@ -27,6 +27,7 @@ INSTALL_ROOT="$DATA_ROOT/installed"
 MODEL_CHECKPOINT="${ASSET_STUDIO_IMAGE_CHECKPOINT:-waiIllustriousSDXL_v170.safetensors}"
 
 export HF_HOME="$DATA_ROOT/cache/huggingface"
+export PIP_CACHE_DIR="$DATA_ROOT/cache/pip"
 export XDG_CACHE_HOME="$DATA_ROOT/cache/xdg"
 export TMPDIR="$DATA_ROOT/scratch"
 export TMP="$TMPDIR"
@@ -37,7 +38,7 @@ export UV_PYTHON_INSTALL_DIR="$DATA_ROOT/python"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9}"
 
-mkdir -p "$SOURCE_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$DATA_ROOT/logs"
+mkdir -p "$SOURCE_ROOT" "$ENV_ROOT" "$INSTALL_ROOT" "$HF_HOME" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" "$TORCH_EXTENSIONS_DIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$DATA_ROOT/logs"
 
 if ! command -v uv >/dev/null 2>&1 && ! command -v conda >/dev/null 2>&1; then
   echo '部署环境需要 uv 或 Conda。' >&2
@@ -59,14 +60,20 @@ make_env() {
 get_repo() {
   local url="$1"
   local target="$2"
-  local ref="${3:-}"
-  if [ ! -d "$target/.git" ]; then
-    if [ -n "$ref" ]; then
-      git clone --recursive --branch "$ref" "$url" "$target"
-    else
-      git clone --recursive "$url" "$target"
-    fi
+  local ref="${3:-main}"
+  local ref_type="${4:-heads}"
+  local repository="${url#https://github.com/}"
+  repository="${repository%.git}"
+  local archive="$DATA_ROOT/source-archives/$(basename "$target")-${ref}.tar.gz"
+  if [ -f "$target/.source-ready" ]; then
+    return
   fi
+  mkdir -p "$DATA_ROOT/source-archives" "$target"
+  curl --fail --location --retry 4 --retry-delay 3 \
+    --output "$archive" \
+    "https://codeload.github.com/$repository/tar.gz/refs/$ref_type/$ref"
+  tar -xzf "$archive" --strip-components=1 -C "$target"
+  touch "$target/.source-ready"
 }
 
 verify_torch() {

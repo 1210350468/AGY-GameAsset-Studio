@@ -15,6 +15,7 @@ from pygltflib import GLTF2
 
 from asset_studio.comfy import generate_image
 from asset_studio.settings import Settings
+from asset_studio.gpu import require_gpu_headroom
 from asset_studio.store import Store, timestamp
 
 
@@ -116,6 +117,7 @@ class AssetPipeline:
                 self._stage(job_id, "导入 GLB", 0.15)
                 generated = job_dir / "input.glb"
             else:
+                require_gpu_headroom(settings)
                 concept = job_dir / "input.png"
                 if not concept.is_file():
                     self._stage(job_id, "生成二次元原画", 0.12)
@@ -154,6 +156,7 @@ class AssetPipeline:
                     raise RuntimeError(f"Unsupported mode: {job['mode']}")
 
                 if params["rig"]:
+                    require_gpu_headroom(settings)
                     self._stage(job_id, "SkinTokens 骨骼与蒙皮", 0.64)
                     rigged = job_dir / "rigged.glb"
                     self._command(
