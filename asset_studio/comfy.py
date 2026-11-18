@@ -6,7 +6,15 @@ import httpx
 from PIL import Image
 
 
-def image_workflow(*, prompt: str, checkpoint: str, seed: int, steps: int, width: int, height: int) -> dict[str, Any]:
+def image_workflow(*, prompt: str, checkpoint: str, seed: int, steps: int, width: int, height: int, kind: str = "character") -> dict[str, Any]:
+    subject_guidance = {
+        "character": "one full body humanoid character, standing neutral A pose, arms separated from torso, entire legs and feet visible, camera facing front,",
+        "monster": "one full body monster, neutral standing pose, arms and legs separated, entire creature visible, camera facing front,",
+        "weapon": "one single weapon item, isolated upright, no person or hand holding it,",
+        "equipment": "one single fantasy equipment set, all armor pieces readable, isolated object,",
+        "prop": "one single game environment prop, isolated three-quarter view,",
+        "scene": "one isolated modular environment asset, three-quarter front view,",
+    }[kind]
     return {
         "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
         "5": {"class_type": "EmptyLatentImage", "inputs": {"batch_size": 1, "width": width, "height": height}},
@@ -14,17 +22,18 @@ def image_workflow(*, prompt: str, checkpoint: str, seed: int, steps: int, width
             "class_type": "CLIPTextEncode",
             "inputs": {
                 "clip": ["4", 1],
-                "text": "masterpiece, best quality, high detail, anime game concept art, "+prompt+
-                ", single subject, full body, centered composition, clear silhouette, plain white background, "
-                "three-quarter front view, entire object visible",
+                "text": "masterpiece, best quality, high detail, dark fantasy game asset concept art, "+prompt+
+                ", " + subject_guidance + " centered composition, clean isolated silhouette, single subject, "
+                "white studio background, soft even diffuse illumination, no cast shadow, entire object visible",
             },
         },
         "7": {
             "class_type": "CLIPTextEncode",
             "inputs": {
                 "clip": ["4", 1],
-                "text": "low quality, cropped, cut off, multiple subjects, multiple views, duplicate, "
-                "text, watermark, logo, background scenery, motion blur, overlapping limbs",
+                "text": "low quality, cropped, cut off, multiple subjects, duplicate silhouette, duplicate figure, "
+                "reference sheet, turnaround sheet, lineup, side drawing, inset shadow figure, cast shadow, "
+                "dark shadow, text, watermark, logo, background scenery, motion blur, overlapping limbs",
             },
         },
         "3": {
@@ -51,11 +60,11 @@ def image_workflow(*, prompt: str, checkpoint: str, seed: int, steps: int, width
 
 
 def generate_image(
-    *, base_url: str, checkpoint: str, prompt: str, destination: Path,
+    *, base_url: str, checkpoint: str, prompt: str, destination: Path, kind: str = "character",
     seed: int, steps: int, timeout_seconds: int, log,
 ) -> None:
     workflow = image_workflow(
-        prompt=prompt, checkpoint=checkpoint, seed=seed, steps=steps, width=1024, height=1024,
+        prompt=prompt, checkpoint=checkpoint, seed=seed, steps=steps, width=1024, height=1024, kind=kind,
     )
     with httpx.Client(base_url=base_url, timeout=30) as client:
         submitted = client.post("/prompt", json={"prompt": workflow})

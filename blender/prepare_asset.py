@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import bmesh
 import bpy
 
 
@@ -10,6 +11,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--input", required=True)
 parser.add_argument("--output", required=True)
 parser.add_argument("--target-faces", type=int, required=True)
+parser.add_argument("--weld-distance", type=float, default=0.000001)
 arguments = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 source = Path(arguments.input).resolve(strict=True)
@@ -36,6 +38,17 @@ if total_triangles > arguments.target_faces:
         bpy.context.view_layer.objects.active = obj
         if len(obj.data.polygons) < 20:
             continue
+        if arguments.weld_distance > 0:
+            mesh_data = bmesh.new()
+            mesh_data.from_mesh(obj.data)
+            bmesh.ops.remove_doubles(
+                mesh_data,
+                verts=list(mesh_data.verts),
+                dist=arguments.weld_distance,
+            )
+            mesh_data.to_mesh(obj.data)
+            mesh_data.free()
+            obj.data.update()
         modifier = obj.modifiers.new(name="GameAssetDecimate", type="DECIMATE")
         modifier.ratio = max(0.001, fraction)
         obj.modifiers.move(len(obj.modifiers) - 1, 0)

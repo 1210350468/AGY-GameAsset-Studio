@@ -8,6 +8,8 @@ const types = {character: "角色", monster: "怪物", weapon: "武器", equipme
 let currentPage = "create";
 let viewer = null;
 let notificationTimer = null;
+let assetCache = [];
+let jobFilter = "all";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"})[char]);
@@ -51,6 +53,10 @@ document.querySelectorAll(".type-choice").forEach((element) => element.addEventL
   const canRig = ["character", "monster"].includes(element.dataset.kind);
   $("#rig").disabled = !canRig;
   $("#rig").checked = canRig;
+  $("#target-faces").value = canRig ? "250000" : "50000";
+  $("#face-guidance").textContent = canRig
+    ? "复杂角色保留约 25 万个三角面，以减少极端减面产生的网格破碎。生成后会检查真实结构。"
+    : "静态道具默认以 5 万个三角面为目标，生成后会检查真实结构。";
 }));
 
 $("#asset-image").addEventListener("change", (event) => {
@@ -102,9 +108,14 @@ $("#import-form").addEventListener("submit", async (event) => {
 
 async function refreshJobs() {
   const data = await api("/api/jobs?limit=100");
-  $("#job-count").textContent = data.jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
+  const activeCount = data.jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
+  const completedCount = data.jobs.filter((job) => job.status === "completed").length;
+  const failedCount = data.jobs.filter((job) => job.status === "failed").length;
+  $("#job-count").textContent = activeCount;
   if (currentPage !== "jobs") return;
-  $("#job-list").innerHTML = data.jobs.length ? data.jobs.map((job) => {
+  $("#job-summary").innerHTML = `<div><small>队列与进行中</small><strong>${activeCount}</strong></div><div><small>已完成的资产</small><strong>${completedCount}</strong></div><div><small>异常任务</small><strong>${failedCount}</strong></div>`;
+  const filtered = data.jobs.filter((job) => jobFilter === "all" || (jobFilter === "active" ? ["queued", "running"].includes(job.status) : job.status === jobFilter));
+  $("#job-list").innerHTML = filtered.length ? filtered.map((job) => {
     const status = {queued: "等待处理", running: "正在制作", completed: "已完成", failed: "失败"}[job.status] ?? job.status;
     const fileUrl = `/api/jobs/${job.id}/file/`;
     return `<article class="job-card">
@@ -114,22 +125,39 @@ async function refreshJobs() {
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}
       <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button>
-      ${job.status === "completed" ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a>` : ""}
+      ${job.status === "completed" ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a><button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
       ${["failed", "completed"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
     </article>`;
-  }).join("") : `<div class="panel muted">目前还没有资产任务，可以从「资产制作」开始。</div>`;
+  }).join("") : `<div class="panel muted">当前筛选条件下没有任务。</div>`;
 }
 
 async function refreshAssets() {
   const data = await api("/api/assets");
-  if (currentPage !== "assets") return;
-  $("#asset-list").innerHTML = data.assets.length ? data.assets.map((asset) => {
-    const url = `/api/jobs/${asset.id}/file/`;
-    return `<article class="asset-card"><div class="asset-thumb"><img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}" onerror="this.hidden=true"></div>
-    <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${escapeHtml(types[asset.kind] ?? asset.kind)} · ${escapeHtml(asset.created_at.slice(0, 10))}</p>
-      <div class="asset-actions"><a class="link-btn" href="/?asset=${asset.id}">预览模型</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a></div></div></article>`;
-  }).join("") : `<div class="panel muted">已完成的资产会自动出现在这里。</div>`;
+  assetCache = data.assets;
+  if (currentPage === "assets") renderAssets();
 }
+
+function renderAssets() {
+  const search = $("#asset-search").value.trim().toLowerCase();
+  const selectedType = $("#asset-type").value;
+  const assets = assetCache.filter((asset) =>
+    asset.title.toLowerCase().includes(search) && (selectedType === "all" || asset.kind === selectedType));
+  $("#asset-total").textContent = `${assets.length} 个资产`;
+  $("#asset-list").innerHTML = assets.length ? assets.map((asset) => {
+    const url = `/api/jobs/${asset.id}/file/`;
+    return `<article class="asset-card"><div class="asset-thumb"><img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}" onerror="this.hidden=true"><span class="asset-kind-tag">${escapeHtml(types[asset.kind] ?? asset.kind)}</span></div>
+    <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${asset.mode === "parts" ? "独立部件" : asset.mode === "import" ? "GLB 导入" : "完整三维模型"} · ${escapeHtml(asset.created_at.slice(0, 10))}</p>
+      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button></div></div></article>`;
+  }).join("") : `<div class="panel muted">当前条件下没有可查看的资产。</div>`;
+}
+
+$("#asset-search").addEventListener("input", renderAssets);
+$("#asset-type").addEventListener("change", renderAssets);
+document.querySelectorAll("[data-job-filter]").forEach((button) => button.addEventListener("click", () => {
+  jobFilter = button.dataset.jobFilter;
+  document.querySelectorAll("[data-job-filter]").forEach((item) => item.classList.toggle("active", item === button));
+  refreshJobs();
+}));
 
 async function refreshSystem() {
   const info = await api("/api/system");
@@ -137,7 +165,7 @@ async function refreshSystem() {
   $("#connection-text").textContent = "工作台连接正常";
   $("#gpu-badge").textContent = info.gpu.available ? info.gpu.devices.map((device) => device.name).join(" / ") : "等待 GPU";
   if (currentPage !== "system") return;
-  const names = {anime: "WAI Illustrious v17", pixal3d: "Pixal3D", partcrafter: "PartCrafter", skintokens: "SkinTokens", blender: "Blender"};
+  const names = {anime: "WAI Illustrious v17", pixal3d: "Pixal3D", partcrafter: "PartCrafter", skintokens: "SkinTokens", blender: "Blender", godot: "Godot 4.7"};
   const cards = Object.entries(info.software).map(([key, value]) => {
     const installed = Boolean(value.installed);
     return `<article class="system-card"><h3>${names[key]}</h3><p class="${installed ? "status-good" : "status-bad"}">${installed ? "● 已安装" : "● 需要安装"}</p>${key === "anime" ? `<p>模型：${escapeHtml(value.model)}</p>` : ""}</article>`;
@@ -151,6 +179,7 @@ async function refreshSystem() {
 document.addEventListener("click", async (event) => {
   const logButton = event.target.closest("[data-log]");
   const retryButton = event.target.closest("[data-retry]");
+  const reprocessButton = event.target.closest("[data-reprocess]");
   const previewButton = event.target.closest("[data-preview]");
   if (logButton) {
     const response = await fetch(`/api/jobs/${logButton.dataset.log}/log`);
@@ -170,6 +199,17 @@ document.addEventListener("click", async (event) => {
       refreshJobs();
     } catch (error) { notify(error.message); }
   }
+  if (reprocessButton) {
+    reprocessButton.disabled = true;
+    try {
+      const result = await api(`/api/jobs/${reprocessButton.dataset.reprocess}/reprocess`, {method: "POST"});
+      notify(`已提交真实网格优化任务 ${result.job_id.slice(0, 8)}`);
+      navigate("jobs");
+    } catch (error) {
+      notify(`网格优化提交失败：${error.message}`, 11000);
+      reprocessButton.disabled = false;
+    }
+  }
   if (previewButton) {
     navigate("assets");
     await openViewer(previewButton.dataset.preview, previewButton.dataset.title);
@@ -180,11 +220,13 @@ function closeViewer() {
   if (viewer) {
     cancelAnimationFrame(viewer.frame);
     viewer.controls.dispose();
+    viewer.debugMaterials.forEach((material) => material.dispose());
     viewer.renderer.dispose();
     viewer = null;
   }
   $("#viewer-canvas").replaceChildren();
   $("#viewer-reference-image").removeAttribute("src");
+  $("#viewer-quality").textContent = "正在读取真实网格检查结果…";
   $("#viewer-panel").hidden = true;
 }
 
@@ -195,30 +237,42 @@ async function openViewer(id, title) {
   $("#viewer-panel").hidden = false;
   $("#viewer-title").textContent = title;
   const reference = $("#viewer-reference");
+  const comparison = $("#viewer-panel .viewer-comparison");
   const referenceImage = $("#viewer-reference-image");
   reference.hidden = false;
-  referenceImage.onerror = () => { reference.hidden = true; };
+  comparison.classList.remove("no-reference");
+  referenceImage.onerror = () => { reference.hidden = true; comparison.classList.add("no-reference"); };
   referenceImage.src = `/api/jobs/${id}/file/input.png`;
   $("#viewer-panel").scrollIntoView({behavior: "smooth", block: "nearest"});
   const container = $("#viewer-canvas");
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xeff3fa);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x98a6c0, 2.4));
+  scene.background = new THREE.Color(0xe8edf5);
+  scene.add(new THREE.HemisphereLight(0xf5f7ff, 0x8493af, 2.3));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
   const keyLight = new THREE.DirectionalLight(0xffffff, 3.1);
-  keyLight.position.set(4, 8, 6);
+  keyLight.position.set(4, 6, 7);
   scene.add(keyLight);
+  const fillLight = new THREE.DirectionalLight(0xa9c6ff, 1.8);
+  fillLight.position.set(-6, 3, -4);
+  scene.add(fillLight);
   const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.01, 500);
   const renderer = new THREE.WebGLRenderer({antialias: true});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.25;
   container.appendChild(renderer.domElement);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  viewer = {renderer, controls, frame: null};
+  viewer = {renderer, controls, frame: null, camera, scene, model: null, originals: new Map(), debugMaterials: [], mode: "material", resetCamera: null};
+  const active = viewer;
+  document.querySelectorAll("[data-view-mode]").forEach((button) => button.classList.toggle("active", button.dataset.viewMode === "material"));
   new GLTFLoader().load(`/api/jobs/${id}/file/model.glb`, (gltf) => {
+    if (viewer !== active) return;
     scene.add(gltf.scene);
+    active.model = gltf.scene;
+    gltf.scene.traverse((node) => { if (node.isMesh) active.originals.set(node, node.material); });
     const bounds = new THREE.Box3().setFromObject(gltf.scene);
     const center = bounds.getCenter(new THREE.Vector3());
     const size = bounds.getSize(new THREE.Vector3()).length();
@@ -228,7 +282,18 @@ async function openViewer(id, title) {
     camera.far = Math.max(50, size * 20);
     camera.updateProjectionMatrix();
     controls.update();
+    active.resetCamera = () => {
+      controls.target.copy(center);
+      camera.position.copy(center).add(new THREE.Vector3(size * 0.8, size * 0.65, size * 0.8));
+      controls.update();
+    };
   }, undefined, (error) => notify(`无法加载模型：${error.message}`, 9000));
+  api(`/api/jobs/${id}/inspect`).then((quality) => {
+    if (viewer !== active) return;
+    const edges = (quality.boundary_edge_ratio * 100).toFixed(2);
+    const connected = (quality.largest_component_ratio * 100).toFixed(1);
+    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${quality.review_required ? "结构需要检查" : "结构检查通过"}</strong><span>依据实际 GLB 网格统计</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div></div>${quality.review_reasons.length ? `<div class="quality-reasons">${quality.review_reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
+  }).catch((error) => { if (viewer === active) $("#viewer-quality").textContent = `质量检查失败：${error.message}`; });
   function render() {
     if (!viewer || viewer.renderer !== renderer) return;
     controls.update();
@@ -237,6 +302,33 @@ async function openViewer(id, title) {
   }
   render();
 }
+
+document.querySelectorAll("[data-view-mode]").forEach((button) => button.addEventListener("click", () => {
+  if (!viewer?.model) return;
+  viewer.mode = button.dataset.viewMode;
+  viewer.debugMaterials.forEach((material) => material.dispose());
+  viewer.debugMaterials = [];
+  viewer.originals.forEach((material, mesh) => {
+    if (viewer.mode === "material") {
+      mesh.material = material;
+    } else {
+      const debug = viewer.mode === "wire"
+        ? new THREE.MeshBasicMaterial({color: 0xb7d0f4, wireframe: true, side: THREE.DoubleSide})
+        : new THREE.MeshStandardMaterial({color: 0xcbd6e5, roughness: 0.86, metalness: 0.0, side: THREE.DoubleSide});
+      mesh.material = debug;
+      viewer.debugMaterials.push(debug);
+    }
+  });
+  document.querySelectorAll("[data-view-mode]").forEach((item) => item.classList.toggle("active", item === button));
+}));
+$("#viewer-reset").addEventListener("click", () => viewer?.resetCamera?.());
+window.addEventListener("resize", () => {
+  if (!viewer) return;
+  const container = $("#viewer-canvas");
+  viewer.camera.aspect = container.clientWidth / container.clientHeight;
+  viewer.camera.updateProjectionMatrix();
+  viewer.renderer.setSize(container.clientWidth, container.clientHeight);
+});
 
 async function tick() {
   try {

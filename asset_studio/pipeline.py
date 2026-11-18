@@ -16,6 +16,7 @@ from pygltflib import GLTF2
 from asset_studio.comfy import generate_image
 from asset_studio.settings import Settings
 from asset_studio.gpu import require_gpu_headroom
+from asset_studio.quality import inspect_model
 from asset_studio.store import Store, timestamp
 
 
@@ -46,13 +47,19 @@ class AssetPipeline:
             if not self.thread.is_alive():
                 self.started = False
 
-    def create(self, *, title: str, kind: str, mode: str, params: dict[str, Any], input_bytes: bytes | None) -> str:
+    def create(
+        self, *, title: str, kind: str, mode: str,
+        params: dict[str, Any], input_bytes: bytes | None,
+        reference_image_bytes: bytes | None = None,
+    ) -> str:
         job_id = uuid.uuid4().hex
         job_dir = self.settings.jobs_root / job_id
         job_dir.mkdir(parents=True, exist_ok=False)
         if input_bytes is not None:
             suffix = ".glb" if mode == "import" else ".png"
             (job_dir / f"input{suffix}").write_bytes(input_bytes)
+        if reference_image_bytes is not None:
+            (job_dir / "input.png").write_bytes(reference_image_bytes)
         self.store.create(job_id, title, kind, mode, params)
         self.jobs.put(job_id)
         return job_id
@@ -129,7 +136,7 @@ class AssetPipeline:
                         raise FileNotFoundError(f"图像模型权重缺失：{settings.image_checkpoint}")
                     generate_image(
                         base_url=settings.comfy_url, checkpoint=settings.checkpoint,
-                        prompt=params["prompt"], destination=concept, seed=params["seed"],
+                        prompt=params["prompt"], destination=concept, kind=job["kind"], seed=params["seed"],
                         steps=params["image_steps"], timeout_seconds=settings.timeout_seconds, log=log,
                     )
 
@@ -240,23 +247,11 @@ class AssetPipeline:
         if not geometries or sum(len(mesh.faces) for mesh in geometries) == 0:
             raise ValueError("GLB 无有效三角面，模型验收失败")
         gltf = GLTF2().load(str(final_model))
-        has_skeleton = bool(gltf.skins)
+        quality = inspect_model(final_model)
+        has_skeleton = quality["skinned"]
         if job["params"].get("rig") and not has_skeleton:
             raise ValueError("自动骨骼任务导出的 GLB 缺少 skin，模型验收失败")
-        face_count = sum(len(mesh.faces) for mesh in geometries)
-        bounds = scene.bounds.tolist()
-        quality = {
-            "geometry_count": len(geometries),
-            "faces": face_count,
-            "bounds": bounds,
-            "skinned": has_skeleton,
-            "joints": sum(len(skin.joints) for skin in gltf.skins),
-            "materials": len(gltf.materials),
-            "textures": len(gltf.textures),
-            "images": len(gltf.images),
-            "watertight_meshes": sum(bool(mesh.is_watertight) for mesh in geometries),
-            "source": "actual GLB geometry inspection",
-        }
+        quality["bounds"] = scene.bounds.tolist()
         (job_dir / "quality.json").write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
         manifest = {
             "asset_id": job["id"], "title": job["title"], "type": job["kind"],

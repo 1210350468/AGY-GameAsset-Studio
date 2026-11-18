@@ -16,6 +16,7 @@ import trimesh
 
 from asset_studio.pipeline import AssetPipeline
 from asset_studio.gpu import memory_headroom, require_gpu_headroom
+from asset_studio.quality import inspect_model
 from asset_studio.settings import Settings
 
 
@@ -253,6 +254,14 @@ def job_log(job_id: str) -> str:
     return path.read_text(encoding="utf-8", errors="replace")[-100000:] if path.exists() else ""
 
 
+@app.get("/api/jobs/{job_id}/inspect")
+def inspect_job(job_id: str) -> dict:
+    model = job_dir(job_id) / "model.glb"
+    if not model.is_file():
+        raise HTTPException(404, "尚未生成模型文件")
+    return inspect_model(model)
+
+
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
     valid_files = {"model.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "manifest.json"}
@@ -282,6 +291,37 @@ def retry(job_id: str) -> dict:
     new_id = pipeline.create(
         title=job["title"], kind=job["kind"], mode=job["mode"],
         params=job["params"], input_bytes=contents,
+        reference_image_bytes=(directory / "input.png").read_bytes()
+        if job["mode"] == "import" and (directory / "input.png").is_file() else None,
+    )
+    return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
+
+
+@app.post("/api/jobs/{job_id}/reprocess", status_code=202)
+def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
+    job = get_job(job_id)
+    if job["status"] != "completed":
+        raise HTTPException(409, "请选择已经完成的资产")
+    source_dir = job_dir(job_id)
+    candidates = (
+        source_dir / "rigged.glb",
+        source_dir / "generated.glb",
+        source_dir / "partcrafter" / job_id / "object.glb",
+        source_dir / "model.glb",
+    )
+    source = next((path for path in candidates if path.is_file()), None)
+    if source is None:
+        raise HTTPException(404, "任务缺少可优化的三维模型")
+    faces = target_faces or (250000 if (source_dir / "rigged.glb").is_file() else 50000)
+    if not 1000 <= faces <= 500000:
+        raise HTTPException(400, "目标三角面数需在 1000 至 500000 之间")
+    reference_path = source_dir / "input.png"
+    reference_image = reference_path.read_bytes() if reference_path.is_file() else None
+    new_id = pipeline.create(
+        title=f"{job['title']} · 网格优化",
+        kind=job["kind"], mode="import",
+        params={"rig": False, "target_faces": faces, "source_job": job_id},
+        input_bytes=source.read_bytes(), reference_image_bytes=reference_image,
     )
     return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
 
