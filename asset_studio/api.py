@@ -302,7 +302,13 @@ async def import_model(
 
 @app.get("/api/jobs")
 def list_jobs(limit: int = Query(50, ge=1, le=200)) -> dict:
-    return {"jobs": pipeline.store.list(limit=limit)}
+    return {"jobs": [
+        {
+            **job,
+            "has_preview": (settings.jobs_root / job["id"] / "input.png").is_file(),
+        }
+        for job in pipeline.store.list(limit=limit)
+    ]}
 
 
 @app.get("/api/jobs/{job_id}")

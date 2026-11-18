@@ -169,7 +169,7 @@ async function refreshJobs() {
     return `<article class="job-card">
       <div class="job-head"><strong>${escapeHtml(job.title)}</strong><span class="label-state ${escapeHtml(job.status)}">${status}</span></div>
       <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(imageModels[job.params?.image_model] || "已有原画")} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
-      ${job.mode !== "import" && !["queued", "生成二次元原画"].includes(job.stage) ? `<a class="job-concept-link" href="${fileUrl}input.png" target="_blank" rel="noopener noreferrer"><img src="${fileUrl}input.png" alt="${escapeHtml(job.title)} 原画" loading="lazy" onerror="this.parentElement.hidden=true"></a>` : ""}
+      ${job.has_preview ? `<a class="job-concept-link" href="${fileUrl}input.png" target="_blank" rel="noopener noreferrer"><img src="${fileUrl}input.png" alt="${escapeHtml(job.title)} 原画" loading="lazy"></a>` : ""}
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}
       <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button>
@@ -509,7 +509,7 @@ setInterval(tick, 4000);
 const requestedAsset = new URLSearchParams(window.location.search).get("asset");
 if (requestedAsset && /^[0-9a-f]{32}$/.test(requestedAsset)) {
   api(`/api/jobs/${requestedAsset}`).then(async (job) => {
-    if (job.status === "completed") {
+    if (["completed", "review_required", "rejected"].includes(job.status)) {
       navigate("assets");
       await openViewer(job.id, job.title, job.has_preview, job.has_fast_preview);
     } else {
