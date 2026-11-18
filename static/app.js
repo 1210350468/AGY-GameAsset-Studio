@@ -9,6 +9,7 @@ let currentPage = "create";
 let viewer = null;
 let notificationTimer = null;
 let assetCache = [];
+let assetsSignature = "";
 let jobFilter = "all";
 
 function escapeHtml(value) {
@@ -134,6 +135,9 @@ async function refreshJobs() {
 
 async function refreshAssets() {
   const data = await api("/api/assets");
+  const signature = JSON.stringify(data.assets.map((asset) => [asset.id, asset.title, asset.status, asset.has_preview]));
+  if (signature === assetsSignature) return;
+  assetsSignature = signature;
   assetCache = data.assets;
   if (currentPage === "assets") renderAssets();
 }
@@ -146,7 +150,7 @@ function renderAssets() {
   $("#asset-total").textContent = `${assets.length} 个资产`;
   $("#asset-list").innerHTML = assets.length ? assets.map((asset) => {
     const url = `/api/jobs/${asset.id}/file/`;
-    return `<article class="asset-card"><div class="asset-thumb"><img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}" onerror="this.hidden=true"><span class="asset-kind-tag">${escapeHtml(types[asset.kind] ?? asset.kind)}</span></div>
+    return `<article class="asset-card"><div class="asset-thumb">${asset.has_preview ? `<img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}">` : `<div class="asset-thumb-empty">3D</div>`}<span class="asset-kind-tag">${escapeHtml(types[asset.kind] ?? asset.kind)}</span></div>
     <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${asset.mode === "parts" ? "独立部件" : asset.mode === "import" ? "GLB 导入" : "完整三维模型"} · ${escapeHtml(asset.created_at.slice(0, 10))}</p>
       <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button></div></div></article>`;
   }).join("") : `<div class="panel muted">当前条件下没有可查看的资产。</div>`;
@@ -178,6 +182,17 @@ async function refreshSystem() {
 }
 
 document.addEventListener("click", async (event) => {
+  const assetLink = event.target.closest('a[href^="/?asset="]');
+  if (assetLink) {
+    event.preventDefault();
+    const target = new URL(assetLink.href).searchParams.get("asset");
+    if (!target || !/^[0-9a-f]{32}$/.test(target)) return;
+    window.history.replaceState(null, "", `/?asset=${target}`);
+    navigate("assets");
+    const job = await api(`/api/jobs/${target}`);
+    await openViewer(job.id, job.title, job.has_preview);
+    return;
+  }
   const logButton = event.target.closest("[data-log]");
   const retryButton = event.target.closest("[data-retry]");
   const reprocessButton = event.target.closest("[data-reprocess]");
@@ -213,7 +228,8 @@ document.addEventListener("click", async (event) => {
   }
   if (previewButton) {
     navigate("assets");
-    await openViewer(previewButton.dataset.preview, previewButton.dataset.title);
+    const job = await api(`/api/jobs/${previewButton.dataset.preview}`);
+    await openViewer(job.id, job.title, job.has_preview);
   }
 });
 
@@ -226,6 +242,7 @@ function closeViewer() {
     viewer = null;
   }
   $("#viewer-canvas").replaceChildren();
+  $("#viewer-canvas").removeAttribute("data-load-state");
   $("#viewer-reference-image").removeAttribute("src");
   $("#viewer-quality").textContent = "正在读取真实网格检查结果…";
   $("#viewer-panel").hidden = true;
@@ -233,19 +250,30 @@ function closeViewer() {
 
 $("#viewer-close").addEventListener("click", closeViewer);
 
-async function openViewer(id, title) {
+async function openViewer(id, title, hasPreview = true) {
   closeViewer();
   $("#viewer-panel").hidden = false;
   $("#viewer-title").textContent = title;
   const reference = $("#viewer-reference");
   const comparison = $("#viewer-panel .viewer-comparison");
   const referenceImage = $("#viewer-reference-image");
-  reference.hidden = false;
+  reference.hidden = !hasPreview;
   comparison.classList.remove("no-reference");
-  referenceImage.onerror = () => { reference.hidden = true; comparison.classList.add("no-reference"); };
-  referenceImage.src = `/api/jobs/${id}/file/input.png`;
+  if (hasPreview) {
+    referenceImage.onerror = () => { reference.hidden = true; comparison.classList.add("no-reference"); };
+    referenceImage.src = `/api/jobs/${id}/file/input.png`;
+  } else {
+    comparison.classList.add("no-reference");
+  }
   $("#viewer-panel").scrollIntoView({behavior: "smooth", block: "nearest"});
   const container = $("#viewer-canvas");
+  container.dataset.loadState = "loading";
+  const overlay = document.createElement("div");
+  overlay.className = "viewer-loading";
+  overlay.innerHTML = '<div class="viewer-loading-spinner" aria-hidden="true"></div><strong>正在加载真实 3D 模型</strong><span>连接服务器并读取模型文件…</span><div class="viewer-loading-track"><div></div></div>';
+  container.appendChild(overlay);
+  const loadingMessage = overlay.querySelector("span");
+  const loadingProgress = overlay.querySelector(".viewer-loading-track div");
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xe8edf5);
   scene.add(new THREE.HemisphereLight(0xf5f7ff, 0x8493af, 2.3));
@@ -273,7 +301,20 @@ async function openViewer(id, title) {
     if (viewer !== active) return;
     scene.add(gltf.scene);
     active.model = gltf.scene;
-    gltf.scene.traverse((node) => { if (node.isMesh) active.originals.set(node, node.material); });
+    let meshCount = 0;
+    gltf.scene.traverse((node) => {
+      if (node.isMesh) {
+        meshCount++;
+        active.originals.set(node, node.material);
+      }
+    });
+    if (meshCount === 0) {
+      container.dataset.loadState = "failed";
+      overlay.classList.add("failed");
+      loadingMessage.textContent = "模型文件未包含可显示的几何网格";
+      return;
+    }
+    container.dataset.meshCount = String(meshCount);
     const bounds = new THREE.Box3().setFromObject(gltf.scene);
     const center = bounds.getCenter(new THREE.Vector3());
     const size = bounds.getSize(new THREE.Vector3()).length();
@@ -283,12 +324,29 @@ async function openViewer(id, title) {
     camera.far = Math.max(50, size * 20);
     camera.updateProjectionMatrix();
     controls.update();
+    container.dataset.loadState = "ready";
+    overlay.remove();
     active.resetCamera = () => {
       controls.target.copy(center);
       camera.position.copy(center).add(new THREE.Vector3(size * 0.8, size * 0.65, size * 0.8));
       controls.update();
     };
-  }, undefined, (error) => notify(`无法加载模型：${error.message}`, 9000));
+  }, (event) => {
+    if (viewer !== active) return;
+    if (event.lengthComputable && event.total > 0) {
+      const percentage = Math.min(100, Math.round(event.loaded / event.total * 100));
+      loadingMessage.textContent = `模型传输：${percentage}%（${(event.loaded / 1048576).toFixed(1)} MB）`;
+      loadingProgress.style.width = `${percentage}%`;
+    } else {
+      loadingMessage.textContent = `模型已接收 ${(event.loaded / 1048576).toFixed(1)} MB，正在读取几何与材质…`;
+    }
+  }, (error) => {
+    if (viewer !== active) return;
+    container.dataset.loadState = "failed";
+    overlay.classList.add("failed");
+    loadingMessage.textContent = `模型加载失败：${error.message}`;
+    notify(`模型加载失败：${error.message}`, 10000);
+  });
   api(`/api/jobs/${id}/inspect`).then((quality) => {
     if (viewer !== active) return;
     const edges = (quality.boundary_edge_ratio * 100).toFixed(2);
@@ -357,7 +415,7 @@ if (requestedAsset && /^[0-9a-f]{32}$/.test(requestedAsset)) {
   api(`/api/jobs/${requestedAsset}`).then(async (job) => {
     if (job.status === "completed") {
       navigate("assets");
-      await openViewer(job.id, job.title);
+      await openViewer(job.id, job.title, job.has_preview);
     } else {
       navigate("jobs");
       notify(`${job.title}：${job.stage}，完成后可以查看 3D 模型`, 9000);

@@ -245,7 +245,8 @@ def list_jobs(limit: int = Query(50, ge=1, le=200)) -> dict:
 
 @app.get("/api/jobs/{job_id}")
 def job_status(job_id: str) -> dict:
-    return get_job(job_id)
+    job = get_job(job_id)
+    return {**job, "has_preview": (job_dir(job_id) / "input.png").is_file()}
 
 
 @app.get("/api/jobs/{job_id}/log", response_class=PlainTextResponse)
@@ -276,7 +277,10 @@ def job_file(job_id: str, file_name: str) -> FileResponse:
 
 @app.get("/api/assets")
 def list_assets() -> dict:
-    return {"assets": [job for job in pipeline.store.list(limit=200) if job["status"] == "completed"]}
+    return {"assets": [
+        {**job, "has_preview": (settings.jobs_root / job["id"] / "input.png").is_file()}
+        for job in pipeline.store.list(limit=200) if job["status"] == "completed"
+    ]}
 
 
 @app.post("/api/jobs/{job_id}/retry", status_code=202)
