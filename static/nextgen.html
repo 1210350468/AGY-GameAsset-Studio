@@ -13,6 +13,7 @@
     article a{display:block}article img{width:100%;height:310px;object-fit:contain;background:#eef0f5;display:block}
     article footer{display:flex;justify-content:space-between;gap:12px;padding:14px;font-size:12px}article footer strong{font-size:13px}
     article footer span{color:#8c98a8}.empty{color:#718198;padding:35px;background:white;border:1px solid #e8eaf2;border-radius:14px}
+    .experiment{padding:20px;display:flex;flex-direction:column;gap:9px}.experiment strong{font-size:15px}.experiment span{font-size:13px;color:#6d788c}.experiment a{color:#4b53b0;font-size:13px;text-decoration:none}.experiment button{border:1px solid #cbd2ee;background:#f5f6ff;color:#414a99;border-radius:8px;padding:10px;cursor:pointer}.experiment button:disabled{opacity:.45;cursor:default}
     @media(max-width:600px){main{padding:20px 16px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}article img{height:220px}}
   </style>
 </head>
@@ -21,6 +22,7 @@
   <header><div><h1>AGY 多视角原画实验</h1><p>Anima 候选设计 · Qwen-Image 2.1 角色一致性</p></div><a class="home" href="/">返回资产工作台</a></header>
   <section><h2>Anima 2.9B · 角色候选原画</h2><p class="description">同一角色描述生成的多张设计候选，可逐张打开完整图片。</p><div class="grid" id="anima"></div></section>
   <section><h2>Qwen-Image 2.1 · 一致性视角</h2><p class="description">使用第一张候选原画作为共同参考，分别生成正面、左侧、背面和右侧。</p><div class="grid" id="qwen"></div></section>
+  <section><h2>Pixal3D · 真实几何对照</h2><p class="description">同一角色的单视角、正反双视角和四视角实验。使用官方多视角权重与相机格式，保存每组实际 GLB 和结构检查数据。</p><div class="grid" id="experiments"></div></section>
 </main>
 <script>
   const names={front:"正面",left:"左侧",back:"背面",right:"右侧"};
@@ -46,8 +48,47 @@
       }
     }
   }
+  let lastExperiments="";
+  async function renderExperiments(){
+    const response=await fetch("/api/nextgen/experiments");
+    if(!response.ok)throw new Error(`重建实验读取失败：${response.status}`);
+    const items=(await response.json()).experiments;
+    const signature=JSON.stringify(items.map(item=>[item.mode,item.finished,item.quality?.faces]));
+    if(signature===lastExperiments)return;
+    lastExperiments=signature;
+    const root=document.getElementById("experiments");
+    root.replaceChildren();
+    for(const item of items){
+      const names={single:"单图重建", "front-back":"正面 + 背面",four:"四视角重建"};
+      const card=document.createElement("article"),content=document.createElement("div"),title=document.createElement("strong"),status=document.createElement("span");
+      content.className="experiment";title.textContent=names[item.mode];
+      const quality=item.quality;
+      status.textContent=quality?`实际三角面 ${quality.faces.toLocaleString()} · 最大连续部分 ${(quality.largest_component_ratio*100).toFixed(2)}% · 非流形边 ${quality.non_manifold_edges.toLocaleString()}`:"正在进行真实重建";
+      content.append(title,status);
+      if(item.model_url){
+        const file=document.createElement("a");file.href=item.model_url;file.textContent="下载原始 GLB";content.appendChild(file);
+      }
+      if(quality){
+        const info=document.createElement("span");
+        info.textContent=quality.game_ready?"网格质量通过，可提交制作 Godot 资源":"网格需要修复："+(quality.game_readiness_reasons||[]).join("；");
+        content.appendChild(info);
+        const button=document.createElement("button");button.textContent="制作可预览的 Godot 游戏资产";
+        button.disabled=!quality.game_ready;
+        button.addEventListener("click",async()=>{
+          button.disabled=true;
+          const response=await fetch(`/api/nextgen/experiments/${item.mode}/package`,{method:"POST"});
+          const result=await response.json();
+          if(!response.ok)throw new Error(JSON.stringify(result));
+          button.textContent=`已创建任务 ${result.job_id.slice(0,8)}`;
+        });
+        content.appendChild(button);
+      }
+      card.appendChild(content);root.appendChild(card);
+    }
+  }
   render().catch(error=>{const p=document.createElement("p");p.className="empty";p.textContent=error.message;document.querySelector("main").appendChild(p);});
-  setInterval(()=>render().catch(error=>console.error(error)),25000);
+  renderExperiments().catch(error=>console.error(error));
+  setInterval(()=>{render().catch(error=>console.error(error));renderExperiments().catch(error=>console.error(error));},25000);
 </script>
 </body>
 </html>

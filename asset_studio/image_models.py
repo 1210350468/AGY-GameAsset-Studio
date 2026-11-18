@@ -137,13 +137,16 @@ def render_reference_views(settings, source: Path, prompt: str, output: Path, se
     uploaded = upload_reference(endpoint, source)
     saved = []
     for index, (name, perspective) in enumerate((
-        ("front", "front"), ("left", "left side"),
+        ("left", "left side"),
         ("back", "back"), ("right", "right side"),
     )):
         workflow = qwen_character_view_workflow(
-            f"<image1> Show the same game asset subject from the {perspective} view. {prompt}. "
-            "Preserve exact identity, construction, equipment, colors and proportions, "
-            "one full body isolated on a white studio background, single view only.",
+            f"<image1> Produce a strict {perspective} turntable reference of this same game asset. "
+            f"Preserve every recognizable feature of the source asset. {prompt}. "
+            "Fixed elevation at eye level, fixed camera distance, 20 degree field of view, "
+            "standing neutral A-pose with arms separated from torso, unchanged body and armor proportions, "
+            "same outfit, colors and fabric, centered full body including shoes, bright white studio background, "
+            "single camera view, no perspective foreshortening, no labels, no additional subjects.",
             uploaded, seed + index,
         )
         images = submit_and_download(
@@ -153,6 +156,9 @@ def render_reference_views(settings, source: Path, prompt: str, output: Path, se
         target = output / f"{name}.png"
         images[0].rename(target)
         saved.append(target)
+    front = output / "front.png"
+    shutil.copy2(source, front)
+    saved.insert(0, front)
     log.write(f"Qwen multi-view references saved: {[str(path) for path in saved]}\n")
     log.flush()
     return saved

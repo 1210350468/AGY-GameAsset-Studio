@@ -142,7 +142,7 @@ curl -X POST http://127.0.0.1:18333/api/import \
 
 查询任务：`GET /api/jobs/{job_id}`；读取日志：`GET /api/jobs/{job_id}/log`；下载完整资源包：`GET /api/jobs/{job_id}/file/godot_asset.zip`；下载 GLB：`GET /api/jobs/{job_id}/file/model.glb`；下载场景：`GET /api/jobs/{job_id}/file/game_asset.tscn`。
 
-原画模型选项与是否已配置：`GET /api/config`；查看任务的候选原画及多角度参考：`GET /api/jobs/{job_id}/references`；使用已生成的 Qwen 四视角重新建模：`POST /api/nextgen/build`。生成的四视角会通过官方的 Pixal3D 相机样例建立 `transforms.json`，保留参考图供审查。
+原画模型选项与是否已配置：`GET /api/config`；查看任务的候选原画及多角度参考：`GET /api/jobs/{job_id}/references`；使用已生成的 Qwen 四视角重新建模：`POST /api/nextgen/build`。四视角输入统一转成正方形 RGB 图片，处理近乎全不透明的 Alpha，规范主体尺寸。相机矩阵来自 Pixal3D 官方示例，`preflight.json` 记录每张图片的来源、尺寸、透明度和相机角度假设。Qwen 编辑视角的精确相机姿态需要经过几何重建对照评估。
 
 Pixal3D 的四视角重建使用 `pipeline_mv_cached_birefnet.json`，沿用 Pixal3D 官方单图配置已经支持的 `ZhengPeng7/BiRefNet` 抠图模型。安装过程会将此配置安装到 Pixal3D 权重目录。对已下载齐全的模型，推理时通过 Hugging Face 离线模式读取本地权重。
 
@@ -154,9 +154,26 @@ Pixal3D 的四视角重建使用 `pipeline_mv_cached_birefnet.json`，沿用 Pix
 
 资产库的 3D 预览支持材质、结构和网格显示模式，自动读取实际 GLB 的开放边界比例、连续网格比例、非流形连接、纹理和骨骼关节数量。质量报告接口为 `GET /api/jobs/{job_id}/inspect`，其中 `review_required` 表示需要进一步检查网格结构。
 
-当完整 GLB 超过 8 MB，工作台会另外生成浏览器用 `preview.glb`，将预览网格控制在较低面数，并将预览贴图最长边缩至 1024 像素。资产库优先加载轻量 GLB，完整分辨率的 `model.glb` 与 Godot 资源包保持原样。轻量文件可通过 `GET /api/jobs/{job_id}/file/preview.glb` 下载。
+当完整 GLB 超过 8 MB，工作台使用 glTF Transform 4.5.0 处理贴图最长边为 1024 像素，并通过 Meshopt 压缩生成浏览器专用 `preview.glb`。三角网格结构经过实际数据检查后保持一致，工作台通过 Three.js MeshoptDecoder 读取预览。完整分辨率的 `model.glb` 与 Godot 资源包保留原始几何，可通过 `GET /api/jobs/{job_id}/file/preview.glb` 获取预览文件。
 
-完整模型在 Blender 减面之前会合并重合的三维顶点，保留原有的 UV、材质和骨骼数据。复杂角色建议使用约 250000 个三角面进行高保真制作。资产库的「重新优化」操作会从原始生成模型重新制作 GLB 和 Godot 资源包，并保留已有原画，接口为 `POST /api/jobs/{job_id}/reprocess`。
+Pixal3D 完整模型保留原始 GLB 几何与 UV，避免重新导入 Blender 造成的拓扑与面朝向变化。原始模型、最终游戏模型与浏览器预览中间文件分别检查最大连续网格、开放边界、非流形边、面朝向与贴图。未通过检查的模型停止游戏资源包制作，同时保存 `raw_quality.json` 等真实诊断数据。模型重建与检查依赖实际权重和实际文件。
+
+### Pixal3D 视角输入与几何对照
+
+```bash
+cd /data/xmu/ym/services/AGY-GameAsset-Studio
+/data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/compare-pixal-views.py \
+  --data-root /data/xmu/ym/asset-studio-data \
+  --source-views /data/xmu/ym/asset-studio-data/jobs/来源任务编号/views \
+  --output /data/xmu/ym/asset-studio-data/validation-assets/pixal-input-fix-20261119 \
+  --modes single front-back four
+```
+
+单图运行官方 `inference.py`；前后双图与四图运行官方 `inference_mv.py`，每种情况分别生成独立的相机文件、原始 GLB 和质量报告。实际结果通过 `GET /api/nextgen/experiments` 读取，也可以在 `/nextgen` 页面查看。只有几何质量合格的模型可以通过 `POST /api/nextgen/experiments/{mode}/package` 进入 Godot 资源制作。
+
+同一组 Qwen 原画的实测：单图最大连续比例 98.05%、非流形边 6619 条；前后双图分别为 98.01%、4047 条；四图分别为 97.30%、7951 条。当前自动验收要求最大连续比例至少 97%，非流形边比例不超过 0.35%，开放边界比例不超过 0.5%，并检查面朝向一致性。前后双视角的结构指标符合本次要求。多视角条件中的相机姿态为未经过几何标定的生成视角假设，继续在预处理报告中显式记录。
+
+完整安装时使用 `bash scripts/install-autodl.sh gltf-transform` 安装隔离的 Node.js 22.15 与 glTF Transform 4.5.0，用于保持网格连续性的浏览器压缩预览。
 
 WAI 原画生成按角色、怪物、武器和场景类别安排主体姿态与构图，优先采用单主体、清晰轮廓、纯色背景和柔和光照。重建与质量检查使用真实模型文件，资产库可以对比原画、材质、结构和网格。
 

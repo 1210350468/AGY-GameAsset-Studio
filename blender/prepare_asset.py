@@ -14,6 +14,7 @@ parser.add_argument("--target-faces", type=int, required=True)
 parser.add_argument("--weld-distance", type=float, default=0.000001)
 parser.add_argument("--max-texture-side", type=int, default=0)
 parser.add_argument("--face-overshoot", type=float, default=1.05)
+parser.add_argument("--preserve-geometry", action="store_true")
 arguments = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 source = Path(arguments.input).resolve(strict=True)
@@ -32,7 +33,7 @@ total_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.poly
 has_armature = any(item.type == "ARMATURE" for item in bpy.data.objects)
 
 # 对角色和静态模型统一执行减面，保留 Armature、顶点权重和原始材质。
-if total_triangles > arguments.target_faces:
+if total_triangles > arguments.target_faces and not arguments.preserve_geometry:
     fraction = arguments.target_faces / total_triangles
     for obj in meshes:
         bpy.ops.object.select_all(action="DESELECT")
@@ -57,6 +58,8 @@ if total_triangles > arguments.target_faces:
         bpy.ops.object.modifier_apply(modifier=modifier.name)
 
 for obj in meshes:
+    if not obj.data.uv_layers and arguments.preserve_geometry:
+        raise ValueError(f"保留几何模式要求完整 UV，缺少 UV 的网格：{obj.name}")
     if not obj.data.uv_layers:
         bpy.ops.object.select_all(action="DESELECT")
         obj.select_set(True)
@@ -71,6 +74,8 @@ for obj in meshes:
 
 output_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
 for attempt in range(4):
+    if arguments.preserve_geometry:
+        break
     if output_triangles <= arguments.target_faces * 1.05:
         break
     # 不规则网格的初次减面比例可能与实际面数不一致，需要再按实际面数调整。
@@ -95,7 +100,7 @@ if arguments.max_texture_side > 0:
         scale = arguments.max_texture_side / max(width, height)
         image.scale(max(1, round(width * scale)), max(1, round(height * scale)))
 
-if output_triangles > arguments.target_faces * arguments.face_overshoot:
+if not arguments.preserve_geometry and output_triangles > arguments.target_faces * arguments.face_overshoot:
     raise RuntimeError(f"模型超过面数要求：{output_triangles} > {arguments.target_faces}")
 
 bpy.ops.object.select_all(action="SELECT")
@@ -111,6 +116,7 @@ print(json.dumps({
     "input_triangles": total_triangles,
     "output_triangles": output_triangles,
     "rigged": has_armature,
+    "preserve_geometry": arguments.preserve_geometry,
     "output_bytes": destination.stat().st_size,
 }, ensure_ascii=False))
 

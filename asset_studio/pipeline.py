@@ -20,6 +20,7 @@ from asset_studio.gpu import GpuCapacityBusy, choose_3d_gpu
 from asset_studio.nextgen import require_gpu_headroom as require_nextgen_gpu_headroom
 from asset_studio.views import prepare_pixal_views
 from asset_studio.quality import inspect_model
+from asset_studio.quality_gate import inspect_game_mesh_quality, require_ready_geometry
 from asset_studio.store import Store, timestamp
 
 
@@ -236,33 +237,79 @@ class AssetPipeline:
             if not generated.is_file() or generated.stat().st_size == 0:
                 raise FileNotFoundError(f"3D 模型没有生成：{generated}")
 
-            self._stage(job_id, "Blender 优化与统一导出", 0.82)
+            self._stage(job_id, "验证原始几何", 0.76)
+            strict_geometry = job["mode"] == "whole" or bool(params.get("strict_geometry"))
+            raw_quality = inspect_game_mesh_quality(generated) if strict_geometry else inspect_model(generated)
+            (job_dir / "raw_quality.json").write_text(
+                json.dumps(raw_quality, ensure_ascii=False, indent=2), encoding="utf-8",
+            )
+            if strict_geometry:
+                require_ready_geometry(raw_quality)
+
+            preserve_source = job["mode"] == "whole" or bool(params.get("preserve_geometry"))
+            self._stage(job_id, "保持原始网格并导出" if preserve_source else "Blender 优化与统一导出", 0.82)
             final_model = job_dir / "model.glb"
             blender = settings.blender_binary()
             if blender is None:
                 raise FileNotFoundError("Blender 未安装，无法完成游戏模型加工")
-            self._command(
-                [blender, "--background", "--python-exit-code", "1", "--python", str(settings.root / "blender" / "prepare_asset.py"),
-                 "--", "--input", str(generated), "--output", str(final_model),
-                 "--target-faces", str(params["target_faces"])],
-                cwd=job_dir, log=log,
-            )
+            if preserve_source:
+                shutil.copy2(generated, final_model)
+                log.write("保留 Pixal3D 原始 GLB 网格与材质，避免重新三角化造成的拓扑变化\n")
+                log.flush()
+            else:
+                command = [
+                    blender, "--background", "--python-exit-code", "1", "--python",
+                    str(settings.root / "blender" / "prepare_asset.py"), "--",
+                    "--input", str(generated), "--output", str(final_model),
+                    "--target-faces", str(params["target_faces"]),
+                ]
+                self._command(command, cwd=job_dir, log=log)
             if not final_model.is_file() or final_model.stat().st_size == 0:
                 raise FileNotFoundError(f"Blender 未输出有效 GLB：{final_model}")
+
+            final_quality = (
+                inspect_game_mesh_quality(final_model, baseline=raw_quality)
+                if strict_geometry else inspect_model(final_model)
+            )
+            (job_dir / "processed_quality.json").write_text(
+                json.dumps(final_quality, ensure_ascii=False, indent=2), encoding="utf-8",
+            )
+            if strict_geometry:
+                require_ready_geometry(final_quality)
 
             if final_model.stat().st_size > 8_000_000:
                 self._stage(job_id, "生成浏览器轻量预览", 0.88)
                 preview = job_dir / "preview.glb"
+                resized = job_dir / "preview-textures.glb"
+                node = settings.envs / "node22" / "bin" / "node"
+                gltf_cli = settings.data_root / "tools" / "gltf-transform" / "node_modules" / "@gltf-transform" / "cli" / "bin" / "cli.js"
+                if not node.is_file() or not gltf_cli.is_file():
+                    raise FileNotFoundError("glTF Transform 尚未安装，执行 scripts/install-gltf-transform.sh")
                 self._command(
-                    [blender, "--background", "--python-exit-code", "1", "--python",
-                     str(settings.root / "blender" / "prepare_asset.py"), "--",
-                     "--input", str(final_model), "--output", str(preview),
-                     "--target-faces", "50000", "--face-overshoot", "1.5",
-                     "--max-texture-side", "1024"],
-                    cwd=job_dir, log=log,
+                    [str(node), str(gltf_cli), "resize", str(final_model), str(resized),
+                     "--width", "1024", "--height", "1024"],
+                    cwd=job_dir, log=log, env={"PATH": str(node.parent) + os.pathsep + os.environ.get("PATH", "")},
+                )
+                preview_quality = (
+                    inspect_game_mesh_quality(resized, baseline=final_quality)
+                    if strict_geometry else inspect_model(resized)
+                )
+                (job_dir / "preview_quality.json").write_text(
+                    json.dumps(preview_quality, ensure_ascii=False, indent=2), encoding="utf-8",
+                )
+                if strict_geometry:
+                    require_ready_geometry(preview_quality)
+                if preview_quality["faces"] != final_quality["faces"] or preview_quality["non_manifold_edges"] != final_quality["non_manifold_edges"]:
+                    raise ValueError("纹理预览处理修改了原始网格拓扑")
+                self._command(
+                    [str(node), str(gltf_cli), "meshopt", str(resized), str(preview),
+                     "--level", "high", "--quantize-position", "16",
+                     "--quantize-normal", "12", "--quantize-texcoord", "14"],
+                    cwd=job_dir, log=log, env={"PATH": str(node.parent) + os.pathsep + os.environ.get("PATH", "")},
                 )
                 if not preview.is_file() or preview.stat().st_size == 0:
-                    raise FileNotFoundError("轻量 GLB 预览生成失败")
+                    raise FileNotFoundError("Meshopt 浏览器预览生成失败")
+                resized.unlink()
 
             self._stage(job_id, "检查模型并打包 Godot 资源", 0.93)
             self._package(job, job_dir, final_model)

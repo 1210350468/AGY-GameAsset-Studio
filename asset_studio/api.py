@@ -2,6 +2,7 @@ import csv
 import ctypes
 import html
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -17,6 +18,8 @@ import trimesh
 
 from asset_studio.pipeline import AssetPipeline
 from asset_studio.image_models import IMAGE_MODELS, MODEL_LABELS, available_models
+from asset_studio.quality_gate import assess_game_mesh_report, inspect_game_mesh_quality
+from asset_studio.quality_gate import require_ready_geometry
 from asset_studio.gpu import memory_headroom
 from asset_studio.quality import inspect_model
 from asset_studio.settings import Settings
@@ -316,21 +319,28 @@ def job_log(job_id: str) -> str:
 
 @app.get("/api/jobs/{job_id}/inspect")
 def inspect_job(job_id: str) -> dict:
-    model = job_dir(job_id) / "model.glb"
-    if not model.is_file():
-        raise HTTPException(404, "尚未生成模型文件")
-    return inspect_model(model)
+    job = get_job(job_id)
+    directory = job_dir(job_id)
+    model = directory / "model.glb"
+    if model.is_file():
+        if job["mode"] == "whole" or job["params"].get("strict_geometry"):
+            return inspect_game_mesh_quality(model)
+        return inspect_model(model)
+    report = directory / "raw_quality.json"
+    if report.is_file():
+        return assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8")))
+    raise HTTPException(404, "尚未生成可检查的三维网格")
 
 
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
-    valid_files = {"model.glb", "preview.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "manifest.json"}
+    valid_files = {"model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "raw_quality.json", "processed_quality.json", "preview_quality.json", "manifest.json"}
     if file_name not in valid_files:
         raise HTTPException(404, "资源类型不存在")
     path = job_dir(job_id) / file_name
     if not path.is_file():
         raise HTTPException(404, "资源尚未生成")
-    media_type = {"model.glb": "model/gltf-binary", "preview.glb": "model/gltf-binary", "godot_asset.zip": "application/zip", "input.png": "image/png"}.get(file_name)
+    media_type = {"model.glb": "model/gltf-binary", "preview.glb": "model/gltf-binary", "generated.glb": "model/gltf-binary", "godot_asset.zip": "application/zip", "input.png": "image/png"}.get(file_name)
     return FileResponse(path, filename=file_name, media_type=media_type)
 
 
@@ -455,6 +465,63 @@ def nextgen_previews() -> dict:
         }
         for image in images if image.is_file()
     ]}
+
+
+@app.get("/api/nextgen/experiments")
+def nextgen_experiments() -> dict:
+    root = settings.data_root / "validation-assets" / "pixal-input-fix-20261119"
+    experiments = []
+    for mode in ("single", "front-back", "four"):
+        directory = root / mode
+        report = directory / "raw_quality.json"
+        geometry = directory / "generated.glb"
+        experiments.append({
+            "mode": mode,
+            "finished": report.is_file() and geometry.is_file(),
+            "quality": assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8"))) if report.is_file() else None,
+            "model_url": f"/api/nextgen/experiments/{mode}/model.glb" if geometry.is_file() and report.is_file() else None,
+        })
+    return {"experiments": experiments}
+
+
+@app.get("/api/nextgen/experiments/{mode}/model.glb")
+def nextgen_experiment_model(mode: str) -> FileResponse:
+    if mode not in {"single", "front-back", "four"}:
+        raise HTTPException(404, "未知实验")
+    directory = settings.data_root / "validation-assets" / "pixal-input-fix-20261119" / mode
+    model = directory / "generated.glb"
+    if not model.is_file() or not (directory / "raw_quality.json").is_file():
+        raise HTTPException(404, "实验模型尚未完成")
+    return FileResponse(model, filename=f"pixal3d-{mode}.glb", media_type="model/gltf-binary")
+
+
+@app.post("/api/nextgen/experiments/{mode}/package", status_code=202)
+def package_nextgen_experiment(mode: str) -> dict:
+    if mode not in {"single", "front-back", "four"}:
+        raise HTTPException(404, "未知实验")
+    directory = settings.data_root / "validation-assets" / "pixal-input-fix-20261119" / mode
+    source = directory / "generated.glb"
+    if not source.is_file() or not (directory / "raw_quality.json").is_file():
+        raise HTTPException(409, "实验重建尚未完成")
+    quality = inspect_game_mesh_quality(source)
+    if not quality["game_ready"]:
+        raise HTTPException(409, "原始网格不符合游戏资产质量要求：" + "；".join(quality["game_readiness_reasons"]))
+    ensure_tool("blender")
+    ensure_tool("godot")
+    reference = settings.jobs_root / "fb581d2bbd534dec9fe2219f1f3e1776" / "input.png"
+    job_id = pipeline.create(
+        title=f"流亡战士 · Pixal3D {mode} 校验模型",
+        kind="character", mode="import",
+        params={
+            "rig": False, "target_faces": 500000,
+            "image_model": "qwen", "multi_views": mode != "single",
+            "strict_geometry": True, "preserve_geometry": True,
+            "source_experiment": mode,
+        },
+        input_bytes=source.read_bytes(),
+        reference_image_bytes=reference.read_bytes() if reference.is_file() else None,
+    )
+    return {"job_id": job_id, "status": "queued", "url": f"/api/jobs/{job_id}"}
 
 
 @app.get("/api/nextgen/images/{image_path:path}")

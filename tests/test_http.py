@@ -23,6 +23,9 @@ def test_real_http_routes() -> None:
         assert client.get("/nextgen").status_code == 200
         assert client.get("/api/nextgen/previews").status_code == 200
         assert client.get("/api/nextgen/images/anima/missing.png").status_code == 404
+        assert len(client.get("/api/nextgen/experiments").json()["experiments"]) == 3
+        assert client.get("/api/nextgen/experiments/invalid/model.glb").status_code == 404
+        assert client.post("/api/nextgen/experiments/invalid/package").status_code == 404
 
 
 def test_missing_job_returns_404() -> None:

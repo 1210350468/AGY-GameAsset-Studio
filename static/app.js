@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 const $ = (selector) => document.querySelector(selector);
 const pages = {create: "制作游戏资产", jobs: "任务进度", assets: "资产库", system: "模型与设备"};
@@ -342,9 +343,18 @@ async function openViewer(id, title, hasPreview = true, hasFastPreview = false) 
   controls.enableDamping = true;
   viewer = {renderer, controls, frame: null, camera, scene, model: null, originals: new Map(), debugMaterials: [], mode: "material", resetCamera: null};
   const active = viewer;
+  api(`/api/jobs/${id}`).then((job) => {
+    if (viewer !== active) return;
+    const label = job.params?.source_gallery ? "Qwen 四视角主原画"
+      : imageModels[job.params?.image_model] || "参考原画";
+    $("#viewer-reference span").textContent = label;
+    $("#viewer-reference-image").alt = label;
+  }).catch((error) => console.error("原画信息读取失败", error));
   document.querySelectorAll("[data-view-mode]").forEach((button) => button.classList.toggle("active", button.dataset.viewMode === "material"));
   const modelFile = hasFastPreview ? "preview.glb" : "model.glb";
-  new GLTFLoader().load(`/api/jobs/${id}/file/${modelFile}`, (gltf) => {
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  loader.load(`/api/jobs/${id}/file/${modelFile}`, (gltf) => {
     if (viewer !== active) return;
     scene.add(gltf.scene);
     active.model = gltf.scene;
@@ -398,7 +408,9 @@ async function openViewer(id, title, hasPreview = true, hasFastPreview = false) 
     if (viewer !== active) return;
     const edges = (quality.boundary_edge_ratio * 100).toFixed(2);
     const connected = (quality.largest_component_ratio * 100).toFixed(1);
-    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${quality.review_required ? "结构需要检查" : "结构检查通过"}</strong><span>依据实际 GLB 网格统计</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div></div>${quality.review_reasons.length ? `<div class="quality-reasons">${quality.review_reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
+    const reasons = [...new Set([...(quality.game_readiness_reasons || []), ...(quality.review_reasons || [])])];
+    const needsReview = quality.game_ready === false || quality.review_required;
+    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${needsReview ? "网格需要修复" : "网格检查通过"}</strong><span>依据实际 GLB 网格统计</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div></div>${reasons.length ? `<div class="quality-reasons">${reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
   }).catch((error) => { if (viewer === active) $("#viewer-quality").textContent = `质量检查失败：${error.message}`; });
   function render() {
     if (!viewer || viewer.renderer !== renderer) return;
