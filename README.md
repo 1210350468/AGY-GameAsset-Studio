@@ -165,8 +165,9 @@ bash scripts/download-nextgen-models.sh all
 /data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/verify-nextgen-source.py --source /data/xmu/ym/asset-studio-data/sources/ComfyUI-v0.37.4
 /data/xmu/ym/asset-studio-data/envs/anime_next/bin/python scripts/verify-nextgen-weights.py /data/xmu/ym/asset-studio-data/models/nextgen/Anima-2.9B/Anima-2.9B-preview-v1.safetensors
 
-# GPU1 空闲显存达到 50000 MiB 后启动独立推理服务
-bash scripts/start-nextgen-comfy.sh
+# 根据全部 A800 的空闲显存与计算负载自动选择显卡，分别运行独立服务
+bash scripts/start-nextgen-comfy.sh anima
+bash scripts/start-nextgen-comfy.sh qwen
 /data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model anima --validate
 /data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model qwen --validate
 /data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model anima --output /data/xmu/ym/asset-studio-data/validation-assets/nextgen
@@ -175,7 +176,9 @@ bash scripts/start-nextgen-comfy.sh
 
 Anima 生成四张同一主题的候选图，Qwen-Image 2.1 基于选定原画分别生成正面、左侧、背面和右侧参考。多视角图片用于评价外观一致性与单图重建输入的选择；当前 Pixal3D 工作台接口仍按一张输入图片执行三维重建。两套新工作流调用实际 ComfyUI 接口并读取生成的 PNG 文件。
 
-GPU1 推理前通过 `nvidia-smi` 严格检查 50000 MiB 空闲显存条件，低于条件立即退出。科研训练进程保持原样，独立 GPU 推理服务位于 `127.0.0.1:8189`。源码和权重检查使用 CPU；实际 ComfyUI `/object_info` 节点注册检查安排在 GPU 服务启动后执行。
+生成的候选图片与多视角参考可以在 [多视角实验画廊](http://127.0.0.1:18333/nextgen) 中查看，也能通过 `GET /api/nextgen/previews` 获取真实文件列表。画廊直接读取已验证的 PNG 文件，页面在现有 Windows SSH 隧道上访问。
+
+每次启动会检查全部 GPU 的空闲显存与利用率，分别为 Anima、Qwen-Image 2.1 预留 18000 MiB、32000 MiB 推理预算，并保留 8000 MiB 显存余量。两个 ComfyUI 服务分别监听 `127.0.0.1:8189` 和 `127.0.0.1:8190`，自动选择独立 GPU，分别保存用户目录、数据库、输入和输出文件。推理期间使用模型卸载与 CPU VAE 降低显存压力；重复生成参考图时会直接复用已完成且通过 PNG 验证的视角文件。科研训练进程保持原样，实际 ComfyUI `/object_info` 节点注册检查安排在 GPU 服务启动后执行。
 
 资源包包含模型、质量检查报告、资产元数据、原画（若提供）及可拆分部件（若有）。骨骼动画重定向、角色战斗状态机、技能逻辑和复杂装备穿模检查在游戏工程内完成。
 

@@ -18,6 +18,9 @@ def test_real_http_routes() -> None:
         assert "cuda" in client.get("/api/system").json()
         assert client.get("/api/config").status_code == 200
         assert client.get("/api/assets").json() == {"assets": []}
+        assert client.get("/nextgen").status_code == 200
+        assert client.get("/api/nextgen/previews").status_code == 200
+        assert client.get("/api/nextgen/images/anima/missing.png").status_code == 404
 
 
 def test_missing_job_returns_404() -> None:

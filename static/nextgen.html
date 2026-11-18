@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AGY 多视角原画实验</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f5f6fa;color:#252f47;font-family:Inter,"Microsoft YaHei",sans-serif}
+    main{max-width:1330px;margin:auto;padding:32px 28px 60px}h1{font-size:27px;margin:0 0 8px}header{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}
+    header p{color:#748093;font-size:13px;margin:0}.home{color:#545bb4;text-decoration:none;padding:12px;background:white;border:1px solid #e0e5ee;border-radius:10px}
+    h2{font-size:18px;margin:35px 0 17px}.description{color:#748093;font-size:13px;line-height:1.8}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:18px}
+    article{background:white;border:1px solid #e5e9f0;border-radius:14px;overflow:hidden;box-shadow:0 10px 32px #24334b09}
+    article a{display:block}article img{width:100%;height:310px;object-fit:contain;background:#eef0f5;display:block}
+    article footer{display:flex;justify-content:space-between;gap:12px;padding:14px;font-size:12px}article footer strong{font-size:13px}
+    article footer span{color:#8c98a8}.empty{color:#718198;padding:35px;background:white;border:1px solid #e8eaf2;border-radius:14px}
+    @media(max-width:600px){main{padding:20px 16px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}article img{height:220px}}
+  </style>
+</head>
+<body>
+<main>
+  <header><div><h1>AGY 多视角原画实验</h1><p>Anima 候选设计 · Qwen-Image 2.1 角色一致性</p></div><a class="home" href="/">返回资产工作台</a></header>
+  <section><h2>Anima 2.9B · 角色候选原画</h2><p class="description">同一角色描述生成的多张设计候选，可逐张打开完整图片。</p><div class="grid" id="anima"></div></section>
+  <section><h2>Qwen-Image 2.1 · 一致性视角</h2><p class="description">使用第一张候选原画作为共同参考，分别生成正面、左侧、背面和右侧。</p><div class="grid" id="qwen"></div></section>
+</main>
+<script>
+  const names={front:"正面",left:"左侧",back:"背面",right:"右侧"};
+  let lastImageList="";
+  async function render(){
+    const response=await fetch("/api/nextgen/previews");
+    if(!response.ok)throw new Error(`原画列表读取失败：${response.status}`);
+    const images=(await response.json()).images;
+    const currentImageList=JSON.stringify(images);
+    if(currentImageList===lastImageList)return;
+    lastImageList=currentImageList;
+    for(const model of ["anima","qwen"]){
+      const root=document.getElementById(model);
+      root.replaceChildren();
+      const matches=images.filter(item=>item.path.startsWith(model+"/"));
+      if(!matches.length){const empty=document.createElement("p");empty.className="empty";empty.textContent="尚无已生成的原画";root.appendChild(empty);continue;}
+      for(const [index,item]of matches.entries()){
+        const article=document.createElement("article"),link=document.createElement("a"),image=document.createElement("img"),footer=document.createElement("footer"),name=document.createElement("strong"),size=document.createElement("span");
+        link.href=item.url;link.target="_blank";image.src=item.url;image.loading="lazy";image.alt=item.path;
+        name.textContent=model==="anima"?`候选 ${index+1}`:names[item.path.split("/")[1]]||item.path;
+        size.textContent=`${(item.size_bytes/1048576).toFixed(2)} MB`;
+        link.appendChild(image);footer.append(name,size);article.append(link,footer);root.appendChild(article);
+      }
+    }
+  }
+  render().catch(error=>{const p=document.createElement("p");p.className="empty";p.textContent=error.message;document.querySelector("main").appendChild(p);});
+  setInterval(()=>render().catch(error=>console.error(error)),25000);
+</script>
+</body>
+</html>

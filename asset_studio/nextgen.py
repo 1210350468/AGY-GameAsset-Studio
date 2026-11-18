@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import subprocess
 import time
 from pathlib import Path
@@ -8,7 +10,9 @@ import httpx
 from PIL import Image
 
 
-MIN_GPU1_FREE_MIB = 50000
+# 科研作业同时占用多张显卡，按单个模型的实际需要预留显存。
+GPU_MEMORY_REQUIREMENTS = {"anima": 18000, "qwen": 32000}
+GPU_MEMORY_RESERVE_MIB = 8000
 ANIMA_MODEL = "Anima-2.9B-preview-v1.safetensors"
 ANIMA_TEXT_ENCODER = "qwen_3_06b_base.safetensors"
 ANIMA_VAE = "qwen_image_vae.safetensors"
@@ -17,17 +21,50 @@ QWEN_TEXT_ENCODER = "qwen3vl_8b_bf16.safetensors"
 QWEN_VAE = "qwen_image_2.1_vae_bf16.safetensors"
 
 
-def require_gpu1_headroom() -> int:
+def gpu_status() -> list[dict[str, int]]:
     result = subprocess.check_output(
-        ["nvidia-smi", "--id=1", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        ["nvidia-smi", "--query-gpu=index,memory.free,utilization.gpu", "--format=csv,noheader,nounits"],
         text=True,
     )
-    available_mib = int(result.strip())
-    if available_mib < MIN_GPU1_FREE_MIB:
-        raise RuntimeError(
-            f"GPU1 空闲显存 {available_mib} MiB，实际推理要求至少 {MIN_GPU1_FREE_MIB} MiB"
-        )
-    return available_mib
+    return [
+        {"index": int(row[0].strip()), "free_mib": int(row[1].strip()), "utilization": int(row[2].strip())}
+        for row in csv.reader(io.StringIO(result)) if row
+    ]
+
+
+def select_gpu(model: str, excluded: set[int] | None = None) -> dict[str, int]:
+    required = GPU_MEMORY_REQUIREMENTS[model] + GPU_MEMORY_RESERVE_MIB
+    measurements = [gpu_status()]
+    for _ in range(2):
+        time.sleep(0.3)
+        measurements.append(gpu_status())
+    cards = [
+        {
+            "index": card["index"],
+            "free_mib": min(next(item for item in snapshot if item["index"] == card["index"])["free_mib"] for snapshot in measurements),
+            "utilization": round(sum(next(item for item in snapshot if item["index"] == card["index"])["utilization"] for snapshot in measurements) / len(measurements)),
+        }
+        for card in measurements[0]
+    ]
+    eligible = [gpu for gpu in cards if gpu["free_mib"] >= required and gpu["index"] not in (excluded or set())]
+    if not eligible:
+        raise RuntimeError(f"没有显卡满足 {model} 的显存需求 {required} MiB；显卡状态：{cards}")
+    return min(eligible, key=lambda gpu: (gpu["utilization"], -gpu["free_mib"], gpu["index"]))
+
+
+def require_gpu_headroom(model: str, gpu_index: int) -> int:
+    required = GPU_MEMORY_REQUIREMENTS[model] + GPU_MEMORY_RESERVE_MIB
+    gpu = next(gpu for gpu in gpu_status() if gpu["index"] == gpu_index)
+    if gpu["free_mib"] < required:
+        raise RuntimeError(f"GPU{gpu_index} 空闲显存 {gpu['free_mib']} MiB，{model} 需要 {required} MiB")
+    return gpu["free_mib"]
+
+
+def require_gpu_reserve(gpu_index: int) -> int:
+    gpu = next(gpu for gpu in gpu_status() if gpu["index"] == gpu_index)
+    if gpu["free_mib"] < GPU_MEMORY_RESERVE_MIB:
+        raise RuntimeError(f"GPU{gpu_index} 空闲显存低于保留额度 {GPU_MEMORY_RESERVE_MIB} MiB")
+    return gpu["free_mib"]
 
 
 def anima_candidates_workflow(prompt: str, seed: int, count: int = 4) -> dict:
@@ -119,9 +156,9 @@ def validate_installed_nodes(endpoint: str, model: str) -> dict:
 
 def submit_and_download(
     endpoint: str, workflow: dict, output_node: str, destination: Path,
-    expected_images: int, timeout_seconds: int = 1800,
+    expected_images: int, model: str, gpu_index: int, timeout_seconds: int = 1800,
 ) -> list[Path]:
-    require_gpu1_headroom()
+    require_gpu_reserve(gpu_index)
     destination.mkdir(parents=True, exist_ok=True)
     with httpx.Client(base_url=endpoint, timeout=120) as client:
         submitted = client.post("/prompt", json={"prompt": workflow})

@@ -331,5 +331,35 @@ def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
     return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
 
 
+@app.get("/api/nextgen/previews")
+def nextgen_previews() -> dict:
+    root = settings.data_root / "validation-assets" / "nextgen"
+    if not root.is_dir():
+        return {"images": []}
+    images = sorted(root.rglob("*.png"), key=lambda path: (path.parent.as_posix(), path.name))
+    return {"images": [
+        {
+            "path": image.relative_to(root).as_posix(),
+            "url": f"/api/nextgen/images/{image.relative_to(root).as_posix()}",
+            "size_bytes": image.stat().st_size,
+        }
+        for image in images if image.is_file()
+    ]}
+
+
+@app.get("/api/nextgen/images/{image_path:path}")
+def nextgen_image(image_path: str) -> FileResponse:
+    root = (settings.data_root / "validation-assets" / "nextgen").resolve()
+    image = (root / image_path).resolve()
+    if not image.is_relative_to(root) or image.suffix.lower() != ".png" or not image.is_file():
+        raise HTTPException(404, "参考原画不存在")
+    return FileResponse(image, media_type="image/png")
+
+
+@app.get("/nextgen")
+def nextgen_gallery() -> FileResponse:
+    return FileResponse(settings.root / "static" / "nextgen.html", media_type="text/html")
+
+
 app.mount("/", StaticFiles(directory=settings.root / "static", html=True), name="static")
 
