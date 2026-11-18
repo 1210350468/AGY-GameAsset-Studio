@@ -34,6 +34,7 @@ def test_missing_job_returns_404() -> None:
         assert client.get("/api/jobs/00000000000000000000000000000000/log").status_code == 404
         assert client.get("/api/jobs/00000000000000000000000000000000/file/model.glb").status_code == 404
         assert client.get("/api/jobs/00000000000000000000000000000000/file/preview.glb").status_code == 404
+        assert client.post("/api/jobs/00000000000000000000000000000000/repair-texture").status_code == 404
 
 
 def test_image_selector_validates_input() -> None:

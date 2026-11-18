@@ -333,6 +333,9 @@ def inspect_job(job_id: str) -> dict:
         report = directory / "appearance_quality.json"
         if report.is_file():
             quality["appearance"] = json.loads(report.read_text(encoding="utf-8"))
+        texture_report = directory / "texture_repair.json"
+        if texture_report.is_file():
+            quality["texture_repair"] = json.loads(texture_report.read_text(encoding="utf-8"))
         quality["visual_review_required"] = (
             job["kind"] in {"character", "monster"}
             and (job["status"] != "completed" or not report.is_file())
@@ -347,7 +350,7 @@ def inspect_job(job_id: str) -> dict:
 
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
-    valid_files = {"model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "raw_quality.json", "processed_quality.json", "preview_quality.json", "appearance_quality.json", "manifest.json"}
+    valid_files = {"model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "raw_quality.json", "processed_quality.json", "preview_quality.json", "appearance_quality.json", "texture_repair.json", "manifest.json"}
     if file_name not in valid_files:
         raise HTTPException(404, "资源类型不存在")
     path = job_dir(job_id) / file_name
@@ -429,6 +432,34 @@ def reject_asset(job_id: str) -> dict:
         raise HTTPException(409, "该资产当前没有等待审核")
     pipeline.store.update(job_id, status="rejected", stage="外观不符合要求", progress=1.0)
     return {"job_id": job_id, "status": "rejected"}
+
+
+@app.post("/api/jobs/{job_id}/repair-texture", status_code=202)
+def repair_asset_texture(job_id: str) -> dict:
+    job = get_job(job_id)
+    if job["status"] not in {"completed", "review_required", "rejected"}:
+        raise HTTPException(409, "请选择已生成完整模型的资产")
+    if job["kind"] not in {"character", "monster"}:
+        raise HTTPException(400, "此操作适用于角色或怪物的贴图残留修复")
+    source_dir = job_dir(job_id)
+    source = source_dir / "model.glb"
+    if not source.is_file():
+        raise HTTPException(404, "原始 GLB 不存在")
+    reference = source_dir / "input.png"
+    ensure_tool("blender")
+    ensure_tool("godot")
+    new_id = pipeline.create(
+        title=f"{job['title']} · 贴图残留修复",
+        kind=job["kind"], mode="import",
+        params={
+            "rig": False, "target_faces": 500000, "strict_geometry": True,
+            "preserve_geometry": True, "repair_texture": True,
+            "source_job": job_id, "image_model": job["params"].get("image_model", "qwen"),
+        },
+        input_bytes=source.read_bytes(),
+        reference_image_bytes=reference.read_bytes() if reference.is_file() else None,
+    )
+    return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
 
 
 @app.post("/api/jobs/{job_id}/retry", status_code=202)

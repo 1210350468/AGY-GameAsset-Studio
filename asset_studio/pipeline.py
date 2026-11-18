@@ -22,6 +22,7 @@ from asset_studio.views import prepare_pixal_views
 from asset_studio.quality import inspect_model
 from asset_studio.quality_gate import inspect_game_mesh_quality, require_ready_geometry
 from asset_studio.appearance import inspect_silhouette
+from asset_studio.texture_repair import repair_opaque_atlas
 from asset_studio.store import Store, timestamp
 
 
@@ -242,6 +243,17 @@ class AssetPipeline:
             if not generated.is_file() or generated.stat().st_size == 0:
                 raise FileNotFoundError(f"3D 模型没有生成：{generated}")
 
+            if params.get("repair_texture"):
+                self._stage(job_id, "修复下半身纹理图集黑色残留", 0.73)
+                repaired = job_dir / "repaired.glb"
+                report = repair_opaque_atlas(generated, repaired)
+                (job_dir / "texture_repair.json").write_text(
+                    json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8",
+                )
+                log.write("纹理图集检查与修复完成：" + json.dumps(report, ensure_ascii=False) + "\n")
+                log.flush()
+                generated = repaired
+
             self._stage(job_id, "验证原始几何", 0.76)
             strict_geometry = job["mode"] == "whole" or bool(params.get("strict_geometry"))
             raw_quality = inspect_game_mesh_quality(generated) if strict_geometry else inspect_model(generated)
@@ -390,6 +402,9 @@ class AssetPipeline:
         quality["bounds"] = scene.bounds.tolist()
         quality["appearance"] = appearance
         quality["review_required"] = bool(appearance)
+        texture_report = job_dir / "texture_repair.json"
+        if texture_report.is_file():
+            quality["texture_repair"] = json.loads(texture_report.read_text(encoding="utf-8"))
         (job_dir / "quality.json").write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
         manifest = {
             "asset_id": job["id"], "title": job["title"], "type": job["kind"],
@@ -403,6 +418,8 @@ class AssetPipeline:
         }
         (job_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         included = ["model.glb", "quality.json", "manifest.json"]
+        if texture_report.is_file():
+            included.append("texture_repair.json")
         if appearance_path.is_file():
             included.append("appearance_quality.json")
         if (job_dir / "input.png").exists():
