@@ -300,8 +300,8 @@ def retry(job_id: str) -> dict:
 @app.post("/api/jobs/{job_id}/reprocess", status_code=202)
 def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
     job = get_job(job_id)
-    if job["status"] != "completed":
-        raise HTTPException(409, "请选择已经完成的资产")
+    if job["status"] not in {"completed", "failed"}:
+        raise HTTPException(409, "请选择已经完成或执行失败的资产任务")
     source_dir = job_dir(job_id)
     candidates = (
         source_dir / "rigged.glb",
@@ -312,7 +312,8 @@ def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
     source = next((path for path in candidates if path.is_file()), None)
     if source is None:
         raise HTTPException(404, "任务缺少可优化的三维模型")
-    faces = target_faces or (250000 if (source_dir / "rigged.glb").is_file() else 50000)
+    high_detail_source = (source_dir / "rigged.glb").is_file() or (source_dir / "generated.glb").is_file()
+    faces = target_faces or (250000 if high_detail_source else 50000)
     if not 1000 <= faces <= 500000:
         raise HTTPException(400, "目标三角面数需在 1000 至 500000 之间")
     reference_path = source_dir / "input.png"

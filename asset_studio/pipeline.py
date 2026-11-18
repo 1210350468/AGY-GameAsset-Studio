@@ -196,11 +196,13 @@ class AssetPipeline:
             if blender is None:
                 raise FileNotFoundError("Blender 未安装，无法完成游戏模型加工")
             self._command(
-                [blender, "--background", "--python", str(settings.root / "blender" / "prepare_asset.py"),
+                [blender, "--background", "--python-exit-code", "1", "--python", str(settings.root / "blender" / "prepare_asset.py"),
                  "--", "--input", str(generated), "--output", str(final_model),
                  "--target-faces", str(params["target_faces"])],
                 cwd=job_dir, log=log,
             )
+            if not final_model.is_file() or final_model.stat().st_size == 0:
+                raise FileNotFoundError(f"Blender 未输出有效 GLB：{final_model}")
 
             self._stage(job_id, "检查模型并打包 Godot 资源", 0.93)
             self._package(job, job_dir, final_model)
