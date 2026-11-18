@@ -43,6 +43,13 @@
           <label class="form-label" for="asset-prompt">创作描述</label>
           <textarea id="asset-prompt" name="prompt" rows="4" maxlength="3000" placeholder="角色造型、武器、配色和材质。例如：奇幻动漫风格的冰霜骑士，蓝色重甲、白色短发、双手符文巨剑，完整角色，明亮柔和的游戏美术。"></textarea>
 
+          <div class="two-col image-model-settings">
+            <div><label class="form-label" for="image-model">原画生成模型</label><select name="image_model" id="image-model"><option value="qwen">Qwen-Image 2.1 · 推荐</option><option value="anima">Anima 2.9B · 动漫风格</option><option value="wai">WAI Illustrious v17 · 经典</option><option value="gpt-image">GPT Image 2.5 Flare · 云端</option></select></div>
+            <div><label class="form-label" for="image-count">原画候选数量</label><select name="image_count" id="image-count"><option value="1">1 张 · 直接建模</option><option value="4">4 张 · 保存全部候选，首张进入建模</option></select></div>
+          </div>
+          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true"><span><strong>Qwen 四视角增强建模</strong><small>自动补充正面、左右侧面与背面，并调用 Pixal3D 多视角重建权重</small></span></label>
+          <p class="field-help" id="image-model-notice">正在检查原画生成模型…</p>
+
           <label class="form-label" for="asset-image">参考图片 <span class="optional">上传图片即可直接进入 3D 建模</span></label>
           <label class="upload" for="asset-image"><span class="upload-icon">＋</span><span id="upload-text">选择角色原画、装备图片或怪物设定图</span><small>PNG / JPG / WEBP，最多 25MB</small></label>
           <input id="asset-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" hidden>
@@ -53,6 +60,7 @@
             <div><label class="form-label" for="target-faces">目标三角面</label><input type="number" name="target_faces" id="target-faces" min="1000" max="500000" value="250000"></div>
           </div>
           <p class="field-help" id="face-guidance">复杂角色默认保留 25 万个三角面，以减少减面造成的网格破碎。制作完成后会检查实际连通性。</p>
+          <label class="check"><input type="checkbox" name="pixal_low_vram" id="pixal-low-vram" value="true" checked><span><strong>与科研任务共享显卡时降低显存占用</strong><small>Pixal3D 分阶段加载模型，采用 1024 级别重建分辨率</small></span></label>
 
           <label class="check"><input type="checkbox" id="rig" name="rig" checked><span><strong>生成骨骼与蒙皮</strong><small>适用于角色和怪物，由 SkinTokens 处理</small></span></label>
 
@@ -61,8 +69,9 @@
           <p class="form-footnote">模型运行前自动检查 GPU 显存。最终资产提供结构检查结果与 Godot 资源包。</p>
         </form>
 
-        <details class="import-panel"><summary>已有 GLB 模型？直接优化并制作游戏资源包</summary><form id="import-form"><label class="form-label" for="import-title">资产名称</label><input id="import-title" name="title" required placeholder="现有模型名称"><label class="form-label" for="import-file">GLB 文件</label><input id="import-file" type="file" name="file" required accept=".glb"><button class="secondary" type="submit">导入并优化模型</button></form></details></div>
-        <aside class="pipeline-sidebar"><div class="sidebar-card"><div class="sidebar-card-eyebrow">PRODUCTION PIPELINE</div><h3>五阶段自动制作</h3><ol class="pipeline-timeline"><li><span>01</span><div><strong>原画生成</strong><small>WAI Illustrious v17</small></div></li><li><span>02</span><div><strong>三维重建</strong><small>Pixal3D / PartCrafter</small></div></li><li><span>03</span><div><strong>角色绑定</strong><small>SkinTokens 骨骼与蒙皮</small></div></li><li><span>04</span><div><strong>结构优化</strong><small>Blender · UV 与网格检查</small></div></li><li><span>05</span><div><strong>引擎导出</strong><small>Godot · GLB + 场景文件</small></div></li></ol></div><div class="sidebar-note"><strong>质量检查</strong><p>生成的模型会检查开放边界、连接异常、贴图与骨骼。可以在资产预览页面查看完整报告。</p></div></aside></div>
+        <details class="import-panel"><summary>已有 GLB 模型？直接优化并制作游戏资源包</summary><form id="import-form"><label class="form-label" for="import-title">资产名称</label><input id="import-title" name="title" required placeholder="现有模型名称"><label class="form-label" for="import-file">GLB 文件</label><input id="import-file" type="file" name="file" required accept=".glb"><button class="secondary" type="submit">导入并优化模型</button></form></details>
+        <div class="model-gallery-shortcut"><a href="/nextgen" target="_blank" rel="noopener">查看已生成的 8 张原画与四视角参考</a><button type="button" id="build-sample-views" class="secondary">用现有 Qwen 四视角建模</button></div></div>
+        <aside class="pipeline-sidebar"><div class="sidebar-card"><div class="sidebar-card-eyebrow">PRODUCTION PIPELINE</div><h3>五阶段自动制作</h3><ol class="pipeline-timeline"><li><span>01</span><div><strong>原画生成</strong><small>Qwen / Anima / WAI / GPT Image</small></div></li><li><span>02</span><div><strong>三维重建</strong><small>Pixal3D 单图 / 多视角 · PartCrafter</small></div></li><li><span>03</span><div><strong>角色绑定</strong><small>SkinTokens 骨骼与蒙皮</small></div></li><li><span>04</span><div><strong>结构优化</strong><small>Blender · UV 与网格检查</small></div></li><li><span>05</span><div><strong>引擎导出</strong><small>Godot · GLB + 场景文件</small></div></li></ol></div><div class="sidebar-note"><strong>质量检查</strong><p>生成的模型会检查开放边界、连接异常、贴图与骨骼。可以在资产预览页面查看完整报告。</p></div></aside></div>
       </section>
 
       <section id="view-jobs" class="view"><div class="section-title"><h2>制作任务</h2><p>真实处理阶段、推理日志与生成文件集中展示。</p></div><div id="job-summary" class="summary-strip"></div><div class="job-filters"><button type="button" class="job-filter active" data-job-filter="all">全部任务</button><button type="button" class="job-filter" data-job-filter="active">正在制作</button><button type="button" class="job-filter" data-job-filter="completed">已完成</button><button type="button" class="job-filter" data-job-filter="failed">异常任务</button></div><div id="job-list" class="stack"></div></section>

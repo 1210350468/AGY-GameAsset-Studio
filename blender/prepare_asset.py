@@ -12,6 +12,8 @@ parser.add_argument("--input", required=True)
 parser.add_argument("--output", required=True)
 parser.add_argument("--target-faces", type=int, required=True)
 parser.add_argument("--weld-distance", type=float, default=0.000001)
+parser.add_argument("--max-texture-side", type=int, default=0)
+parser.add_argument("--face-overshoot", type=float, default=1.05)
 arguments = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 source = Path(arguments.input).resolve(strict=True)
@@ -68,7 +70,32 @@ for obj in meshes:
     obj.data.update()
 
 output_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
-if output_triangles > arguments.target_faces * 1.05:
+for attempt in range(4):
+    if output_triangles <= arguments.target_faces * 1.05:
+        break
+    # 不规则网格的初次减面比例可能与实际面数不一致，需要再按实际面数调整。
+    ratio = max(0.001, min(0.95, arguments.target_faces / output_triangles * 0.9))
+    for obj in meshes:
+        if len(obj.data.polygons) < 20:
+            continue
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        modifier = obj.modifiers.new(name=f"GameAssetFaceBudget{attempt + 1}", type="DECIMATE")
+        modifier.ratio = ratio
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+        obj.data.validate()
+        obj.data.update()
+    output_triangles = sum(sum(len(polygon.vertices) - 2 for polygon in obj.data.polygons) for obj in meshes)
+if arguments.max_texture_side > 0:
+    for image in bpy.data.images:
+        width, height = image.size
+        if max(width, height) <= arguments.max_texture_side:
+            continue
+        scale = arguments.max_texture_side / max(width, height)
+        image.scale(max(1, round(width * scale)), max(1, round(height * scale)))
+
+if output_triangles > arguments.target_faces * arguments.face_overshoot:
     raise RuntimeError(f"模型超过面数要求：{output_triangles} > {arguments.target_faces}")
 
 bpy.ops.object.select_all(action="SELECT")

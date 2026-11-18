@@ -5,6 +5,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 const $ = (selector) => document.querySelector(selector);
 const pages = {create: "制作游戏资产", jobs: "任务进度", assets: "资产库", system: "模型与设备"};
 const types = {character: "角色", monster: "怪物", weapon: "武器", equipment: "装备", prop: "道具", scene: "场景"};
+const imageModels = {qwen: "Qwen-Image 2.1", anima: "Anima 2.9B", wai: "WAI Illustrious v17", "gpt-image": "GPT Image 2.5 Flare"};
 let currentPage = "create";
 let viewer = null;
 let notificationTimer = null;
@@ -65,12 +66,56 @@ $("#asset-image").addEventListener("change", (event) => {
   $("#upload-text").textContent = file ? file.name : "选择角色原画、装备图片或怪物设定图";
   $("#image-preview-wrap").hidden = !file;
   if (file) $("#image-preview").src = URL.createObjectURL(file);
+  syncImageSelection();
 });
 $("#clear-image").addEventListener("click", () => {
   $("#asset-image").value = "";
   $("#image-preview").removeAttribute("src");
   $("#image-preview-wrap").hidden = true;
   $("#upload-text").textContent = "选择角色原画、装备图片或怪物设定图";
+  syncImageSelection();
+});
+
+function syncImageSelection() {
+  const uploaded = Boolean($("#asset-image").files.length);
+  $("#image-model").disabled = uploaded;
+  $("#image-count").disabled = uploaded;
+  $("#image-model-notice").textContent = uploaded
+    ? "已选择参考图片，直接使用上传原画进行三维建模；可以单独开启四视角增强。"
+    : "原画模型决定实际调用的生成服务。四张候选会全部保存，默认使用第一张建模。";
+}
+
+$("#model-mode").addEventListener("change", () => {
+  if ($("#model-mode").value === "parts") $("#multi-views").checked = false;
+  $("#multi-views").disabled = $("#model-mode").value === "parts";
+});
+
+api("/api/config").then((settings) => {
+  for (const model of settings.image_models) {
+    const option = $("#image-model").querySelector(`option[value="${model.id}"]`);
+    if (option) {
+      option.disabled = !model.available;
+      option.textContent = `${imageModels[model.id]}${model.available ? "" : " · 尚未配置"}`;
+    }
+  }
+  const preferred = settings.image_models.find((model) => model.id === "qwen" && model.available)
+    || settings.image_models.find((model) => model.available);
+  if (preferred) $("#image-model").value = preferred.id;
+  syncImageSelection();
+}).catch((error) => { $("#image-model-notice").textContent = `无法读取模型状态：${error.message}`; });
+
+$("#build-sample-views").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await api("/api/nextgen/build", {method: "POST", body: new FormData()});
+    notify(`Qwen 四视角建模任务已登记：${response.job_id.slice(0, 8)}`);
+    navigate("jobs");
+  } catch (error) {
+    notify(`四视角任务提交失败：${error.message}`, 11000);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 $("#create-form").addEventListener("submit", async (event) => {
@@ -121,12 +166,13 @@ async function refreshJobs() {
     const fileUrl = `/api/jobs/${job.id}/file/`;
     return `<article class="job-card">
       <div class="job-head"><strong>${escapeHtml(job.title)}</strong><span class="label-state ${escapeHtml(job.status)}">${status}</span></div>
-      <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
+      <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(imageModels[job.params?.image_model] || "已有原画")} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
       ${job.mode !== "import" && !["queued", "生成二次元原画"].includes(job.stage) ? `<a class="job-concept-link" href="${fileUrl}input.png" target="_blank" rel="noopener noreferrer"><img src="${fileUrl}input.png" alt="${escapeHtml(job.title)} 原画" loading="lazy" onerror="this.parentElement.hidden=true"></a>` : ""}
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}
       <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button>
       ${job.status === "completed" ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a>` : ""}
+      ${job.params?.multi_views ? `<a class="link-btn" href="/api/jobs/${job.id}/references" target="_blank">多视角参考</a>` : ""}
       ${["completed", "failed"].includes(job.status) ? `<button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
       ${["failed", "completed"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
     </article>`;
@@ -190,7 +236,7 @@ document.addEventListener("click", async (event) => {
     window.history.replaceState(null, "", `/?asset=${target}`);
     navigate("assets");
     const job = await api(`/api/jobs/${target}`);
-    await openViewer(job.id, job.title, job.has_preview);
+    await openViewer(job.id, job.title, job.has_preview, job.has_fast_preview);
     return;
   }
   const logButton = event.target.closest("[data-log]");
@@ -229,7 +275,7 @@ document.addEventListener("click", async (event) => {
   if (previewButton) {
     navigate("assets");
     const job = await api(`/api/jobs/${previewButton.dataset.preview}`);
-    await openViewer(job.id, job.title, job.has_preview);
+    await openViewer(job.id, job.title, job.has_preview, job.has_fast_preview);
   }
 });
 
@@ -250,7 +296,7 @@ function closeViewer() {
 
 $("#viewer-close").addEventListener("click", closeViewer);
 
-async function openViewer(id, title, hasPreview = true) {
+async function openViewer(id, title, hasPreview = true, hasFastPreview = false) {
   closeViewer();
   $("#viewer-panel").hidden = false;
   $("#viewer-title").textContent = title;
@@ -297,7 +343,8 @@ async function openViewer(id, title, hasPreview = true) {
   viewer = {renderer, controls, frame: null, camera, scene, model: null, originals: new Map(), debugMaterials: [], mode: "material", resetCamera: null};
   const active = viewer;
   document.querySelectorAll("[data-view-mode]").forEach((button) => button.classList.toggle("active", button.dataset.viewMode === "material"));
-  new GLTFLoader().load(`/api/jobs/${id}/file/model.glb`, (gltf) => {
+  const modelFile = hasFastPreview ? "preview.glb" : "model.glb";
+  new GLTFLoader().load(`/api/jobs/${id}/file/${modelFile}`, (gltf) => {
     if (viewer !== active) return;
     scene.add(gltf.scene);
     active.model = gltf.scene;
@@ -415,7 +462,7 @@ if (requestedAsset && /^[0-9a-f]{32}$/.test(requestedAsset)) {
   api(`/api/jobs/${requestedAsset}`).then(async (job) => {
     if (job.status === "completed") {
       navigate("assets");
-      await openViewer(job.id, job.title, job.has_preview);
+      await openViewer(job.id, job.title, job.has_preview, job.has_fast_preview);
     } else {
       navigate("jobs");
       notify(`${job.title}：${job.stage}，完成后可以查看 3D 模型`, 9000);

@@ -4,6 +4,7 @@ import queue
 import shutil
 import subprocess
 import threading
+import time
 import traceback
 import uuid
 import zipfile
@@ -13,9 +14,11 @@ from typing import Any
 import trimesh
 from pygltflib import GLTF2
 
-from asset_studio.comfy import generate_image
+from asset_studio.image_models import render_concept, render_reference_views
 from asset_studio.settings import Settings
-from asset_studio.gpu import require_gpu_headroom
+from asset_studio.gpu import GpuCapacityBusy, choose_3d_gpu
+from asset_studio.nextgen import require_gpu_headroom as require_nextgen_gpu_headroom
+from asset_studio.views import prepare_pixal_views
 from asset_studio.quality import inspect_model
 from asset_studio.store import Store, timestamp
 
@@ -51,6 +54,7 @@ class AssetPipeline:
         self, *, title: str, kind: str, mode: str,
         params: dict[str, Any], input_bytes: bytes | None,
         reference_image_bytes: bytes | None = None,
+        reference_views: dict[str, bytes] | None = None,
     ) -> str:
         job_id = uuid.uuid4().hex
         job_dir = self.settings.jobs_root / job_id
@@ -60,6 +64,13 @@ class AssetPipeline:
             (job_dir / f"input{suffix}").write_bytes(input_bytes)
         if reference_image_bytes is not None:
             (job_dir / "input.png").write_bytes(reference_image_bytes)
+        if reference_views is not None:
+            views_dir = job_dir / "views"
+            views_dir.mkdir()
+            for name, image_bytes in reference_views.items():
+                if name not in {"front", "right", "back", "left"}:
+                    raise ValueError("参考图视角无效")
+                (views_dir / f"{name}.png").write_bytes(image_bytes)
         self.store.create(job_id, title, kind, mode, params)
         self.jobs.put(job_id)
         return job_id
@@ -85,6 +96,11 @@ class AssetPipeline:
                 return
             try:
                 self._execute(job_id)
+            except GpuCapacityBusy as error:
+                current = self.store.get(job_id)
+                self.store.update(job_id, status="queued", stage=str(error), progress=current["progress"])
+                self.jobs.put(job_id)
+                time.sleep(30)
             except Exception as error:
                 self.store.update(job_id, status="failed", stage="failed", progress=0, error=str(error))
                 with (self.settings.jobs_root / job_id / "process.log").open("a", encoding="utf-8") as log:
@@ -128,38 +144,68 @@ class AssetPipeline:
                 self._stage(job_id, "导入 GLB", 0.15)
                 generated = job_dir / "input.glb"
             else:
-                require_gpu_headroom(settings)
                 concept = job_dir / "input.png"
                 if not concept.is_file():
-                    self._stage(job_id, "生成二次元原画", 0.12)
-                    if not settings.image_checkpoint.is_file():
-                        raise FileNotFoundError(f"图像模型权重缺失：{settings.image_checkpoint}")
-                    generate_image(
-                        base_url=settings.comfy_url, checkpoint=settings.checkpoint,
-                        prompt=params["prompt"], destination=concept, kind=job["kind"], seed=params["seed"],
-                        steps=params["image_steps"], timeout_seconds=settings.timeout_seconds, log=log,
+                    model = params.get("image_model", "wai")
+                    if model in {"qwen", "anima"}:
+                        gpu_file = settings.data_root / f"nextgen-{model}-gpu"
+                        gpu_index = int(gpu_file.read_text(encoding="utf-8").strip())
+                        try:
+                            require_nextgen_gpu_headroom(model, gpu_index)
+                        except RuntimeError as error:
+                            raise GpuCapacityBusy(str(error)) from error
+                    elif model == "wai":
+                        from asset_studio.gpu import memory_headroom
+                        memory = memory_headroom(settings)
+                        if not memory["ready"]:
+                            raise GpuCapacityBusy(f"WAI 当前 GPU 空闲显存 {memory['free_mib']} MiB，要求 {memory['required_mib']} MiB")
+                    self._stage(job_id, f"{model} 生成原画", 0.12)
+                    render_concept(
+                        settings=settings, model=model, prompt=params["prompt"], kind=job["kind"],
+                        seed=params["seed"], steps=params["image_steps"],
+                        candidates=params.get("image_count", 1), destination=concept, log=log,
                     )
 
+                use_multiview = bool(params.get("multi_views"))
+                if use_multiview and not (job_dir / "pixal_views" / "transforms.json").is_file():
+                    views = job_dir / "views"
+                    if not all((views / f"{name}.png").is_file() for name in ("front", "right", "back", "left")):
+                        gpu_index = int((settings.data_root / "nextgen-qwen-gpu").read_text(encoding="utf-8").strip())
+                        try:
+                            require_nextgen_gpu_headroom("qwen", gpu_index)
+                        except RuntimeError as error:
+                            raise GpuCapacityBusy(str(error)) from error
+                        self._stage(job_id, "Qwen 生成四视角参考", 0.27)
+                        views.mkdir(exist_ok=True)
+                        render_reference_views(settings, concept, params["prompt"], views, params["seed"], log)
+                    prepare_pixal_views(settings.pixal_repo, views, job_dir / "pixal_views")
+
                 if job["mode"] == "whole":
-                    require_gpu_headroom(settings)
-                    self._stage(job_id, "Pixal3D 重建与材质生成", 0.35)
                     generated = job_dir / "generated.glb"
-                    naf_repo = settings.sources / "NAF"
-                    checkpoint = settings.data_root / "cache" / "torch" / "hub" / "checkpoints" / "naf_release.pth"
-                    if not (naf_repo / "hubconf.py").is_file() or not checkpoint.is_file():
-                        raise FileNotFoundError("Pixal3D 所需的 NAF 源码或权重缺失")
-                    args = [
-                        str(settings.pixal_python), "inference.py", "--image", str(concept),
-                        "--output", str(generated), "--seed", str(params["seed"]),
-                        "--model_path", str(settings.pixal_model_path),
-                    ]
-                    if settings.pixal_low_vram:
-                        args.extend(["--low_vram", "--resolution", "1024"])
-                    else:
-                        args.extend(["--resolution", "1536"])
-                    self._command(args, cwd=settings.pixal_repo, log=log, env={"ATTN_BACKEND": "sdpa"})
+                    if not generated.is_file():
+                        low_vram = params.get("pixal_low_vram", settings.pixal_low_vram)
+                        gpu_index = choose_3d_gpu(settings, low_vram_pixal=low_vram)
+                        self._stage(job_id, "Pixal3D 多视角重建" if use_multiview else "Pixal3D 重建与材质生成", 0.35)
+                        args = [
+                            str(settings.pixal_python), "inference_mv.py" if use_multiview else "inference.py",
+                        ]
+                        args.extend(["--views_dir", str(job_dir / "pixal_views")] if use_multiview else ["--image", str(concept)])
+                        args.extend([
+                            "--output", str(generated), "--seed", str(params["seed"]),
+                            "--model_path", str(settings.pixal_model_path),
+                        ])
+                        if use_multiview:
+                            args.extend(["--config_file", "pipeline_mv_cached_birefnet.json"])
+                        if low_vram:
+                            args.extend(["--low_vram", "--resolution", "1024"])
+                        else:
+                            args.extend(["--resolution", "1536"])
+                        self._command(args, cwd=settings.pixal_repo, log=log, env={
+                            "ATTN_BACKEND": "sdpa", "CUDA_VISIBLE_DEVICES": str(gpu_index),
+                            "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                        })
                 elif job["mode"] == "parts":
-                    require_gpu_headroom(settings)
+                    gpu_index = choose_3d_gpu(settings)
                     self._stage(job_id, "PartCrafter 分部件建模", 0.35)
                     output_root = job_dir / "partcrafter"
                     args = [
@@ -170,20 +216,20 @@ class AssetPipeline:
                     ]
                     self._command(
                         args, cwd=settings.part_repo, log=log,
-                        env={"PYTHONPATH": str(settings.part_repo) + os.pathsep + os.environ.get("PYTHONPATH", "")},
+                        env={"PYTHONPATH": str(settings.part_repo) + os.pathsep + os.environ.get("PYTHONPATH", ""), "CUDA_VISIBLE_DEVICES": str(gpu_index)},
                     )
                     generated = output_root / job_id / "object.glb"
                 else:
                     raise RuntimeError(f"Unsupported mode: {job['mode']}")
 
                 if params["rig"]:
-                    require_gpu_headroom(settings)
+                    gpu_index = choose_3d_gpu(settings)
                     self._stage(job_id, "SkinTokens 骨骼与蒙皮", 0.64)
                     rigged = job_dir / "rigged.glb"
                     self._command(
                         [str(settings.rig_python), "demo.py", "--input", str(generated),
                          "--output", str(rigged), "--use_transfer"],
-                        cwd=settings.rig_repo, log=log,
+                        cwd=settings.rig_repo, log=log, env={"CUDA_VISIBLE_DEVICES": str(gpu_index)},
                     )
                     generated = rigged
 
@@ -203,6 +249,20 @@ class AssetPipeline:
             )
             if not final_model.is_file() or final_model.stat().st_size == 0:
                 raise FileNotFoundError(f"Blender 未输出有效 GLB：{final_model}")
+
+            if final_model.stat().st_size > 8_000_000:
+                self._stage(job_id, "生成浏览器轻量预览", 0.88)
+                preview = job_dir / "preview.glb"
+                self._command(
+                    [blender, "--background", "--python-exit-code", "1", "--python",
+                     str(settings.root / "blender" / "prepare_asset.py"), "--",
+                     "--input", str(final_model), "--output", str(preview),
+                     "--target-faces", "50000", "--face-overshoot", "1.5",
+                     "--max-texture-side", "1024"],
+                    cwd=job_dir, log=log,
+                )
+                if not preview.is_file() or preview.stat().st_size == 0:
+                    raise FileNotFoundError("轻量 GLB 预览生成失败")
 
             self._stage(job_id, "检查模型并打包 Godot 资源", 0.93)
             self._package(job, job_dir, final_model)
@@ -261,11 +321,16 @@ class AssetPipeline:
             "model": "model.glb", "scene": "game_asset.tscn", "engine": "Godot 4", "quality": quality,
             "rig_generated": has_skeleton,
             "animations_included": bool(gltf.animations),
+            "image_model": job["params"].get("image_model", "wai"),
+            "multi_views": bool(job["params"].get("multi_views", False)),
         }
         (job_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         included = ["model.glb", "quality.json", "manifest.json"]
         if (job_dir / "input.png").exists():
             included.append("input.png")
+        for category in ("views", "candidates"):
+            for image in sorted((job_dir / category).glob("*.png")):
+                included.append(str(image.relative_to(job_dir)))
         for part in sorted((job_dir / "partcrafter" / job["id"]).glob("part_*.glb")):
             included.append(str(part.relative_to(job_dir)))
         bundle_path = job_dir / "godot_asset.zip"

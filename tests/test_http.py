@@ -17,6 +17,8 @@ def test_real_http_routes() -> None:
         assert client.get("/api/system").status_code == 200
         assert "cuda" in client.get("/api/system").json()
         assert client.get("/api/config").status_code == 200
+        models = client.get("/api/config").json()["image_models"]
+        assert {model["id"] for model in models} == {"qwen", "anima", "wai", "gpt-image"}
         assert client.get("/api/assets").json() == {"assets": []}
         assert client.get("/nextgen").status_code == 200
         assert client.get("/api/nextgen/previews").status_code == 200
@@ -28,4 +30,15 @@ def test_missing_job_returns_404() -> None:
         assert client.get("/api/jobs/not-a-valid-uuid").status_code == 404
         assert client.get("/api/jobs/00000000000000000000000000000000/log").status_code == 404
         assert client.get("/api/jobs/00000000000000000000000000000000/file/model.glb").status_code == 404
+        assert client.get("/api/jobs/00000000000000000000000000000000/file/preview.glb").status_code == 404
+
+
+def test_image_selector_validates_input() -> None:
+    with TestClient(app) as client:
+        invalid = client.post("/api/jobs", data={"title": "测试模型", "image_model": "other"})
+        assert invalid.status_code == 400
+        count = client.post("/api/jobs", data={"title": "测试模型", "image_count": "3"})
+        assert count.status_code == 400
+        mode = client.post("/api/jobs", data={"title": "测试模型", "multi_views": "true", "mode": "parts"})
+        assert mode.status_code == 400
 

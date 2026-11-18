@@ -116,6 +116,9 @@ if [ "$TARGET" = pixal3d ]; then
     "$SOURCE_ROOT/Pixal3D/pixal3d/trainers/flow_matching/mixins/image_conditioned_proj.py"
   (cd "$SOURCE_ROOT/Pixal3D" && "$ENV_ROOT/pixal/bin/python" -c 'from pixal3d.pipelines import Pixal3DImageTo3DPipeline; import o_voxel; print("Pixal3D imports passed")')
   test -s "$MODEL_ROOT/Pixal3D/pipeline.json"
+  test -s "$MODEL_ROOT/Pixal3D/pipeline_mv.json"
+  cp "$STUDIO_ROOT/pixal_mv_cached_birefnet.json" "$MODEL_ROOT/Pixal3D/pipeline_mv_cached_birefnet.json"
+  test -s "$MODEL_ROOT/Pixal3D/pipeline_mv_cached_birefnet.json"
   touch "$INSTALL_ROOT/pixal3d"
   exit 0
 fi

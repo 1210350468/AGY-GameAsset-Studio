@@ -1,5 +1,6 @@
 import csv
 import ctypes
+import html
 import io
 import os
 import shutil
@@ -9,13 +10,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 import trimesh
 
 from asset_studio.pipeline import AssetPipeline
-from asset_studio.gpu import memory_headroom, require_gpu_headroom
+from asset_studio.image_models import IMAGE_MODELS, MODEL_LABELS, available_models
+from asset_studio.gpu import memory_headroom
 from asset_studio.quality import inspect_model
 from asset_studio.settings import Settings
 
@@ -134,6 +136,10 @@ def config() -> dict:
         "comfy_url": settings.comfy_url,
         "default_engine": "Godot 4",
         "modes": ["whole", "parts"],
+        "image_models": [
+            {"id": model, "name": MODEL_LABELS[model], "available": available_models(settings)[model]}
+            for model in IMAGE_MODELS
+        ],
     }
 
 
@@ -149,6 +155,10 @@ async def create_job(
     seed: int = Form(42),
     image_steps: int = Form(30),
     target_faces: int = Form(50000),
+    image_model: str = Form("qwen"),
+    image_count: int = Form(1),
+    multi_views: bool = Form(False),
+    pixal_low_vram: bool = Form(True),
 ) -> dict:
     if kind not in {"character", "monster", "weapon", "equipment", "prop", "scene"}:
         raise HTTPException(400, "资产类型无效")
@@ -156,6 +166,12 @@ async def create_job(
         raise HTTPException(400, "建模模式无效")
     if rig and kind not in {"character", "monster"}:
         raise HTTPException(400, "自动骨骼仅支持角色和怪物")
+    if image_model not in IMAGE_MODELS:
+        raise HTTPException(400, "原画模型无效")
+    if image_count not in {1, 4}:
+        raise HTTPException(400, "原画候选数需为 1 张或 4 张")
+    if multi_views and mode != "whole":
+        raise HTTPException(400, "多视角建模需要使用 Pixal3D 完整模型")
     if not title.strip() or len(title) > 100 or len(prompt) > 3000:
         raise HTTPException(400, "标题或描述长度无效")
     if not (1 <= num_parts <= 16 and 1 <= image_steps <= 80 and 0 <= seed <= 2**32 - 1 and 1000 <= target_faces <= 500000):
@@ -189,21 +205,59 @@ async def create_job(
     if content is None:
         if not prompt.strip():
             raise HTTPException(400, "请输入原画描述或上传参考图片")
-        ensure_tool("anime")
+        if image_model == "wai":
+            ensure_tool("anime")
+        elif not available_models(settings)[image_model]:
+            raise HTTPException(503, f"原画模型 {MODEL_LABELS[image_model]} 尚未配置完成")
 
     cuda = cuda_info()
     if not cuda["ready"]:
         raise HTTPException(503, cuda["diagnostic"])
-    try:
-        require_gpu_headroom(settings)
-    except RuntimeError as error:
-        raise HTTPException(503, str(error)) from error
-
     params = {
         "prompt": prompt.strip(), "rig": rig, "num_parts": num_parts,
         "seed": seed, "image_steps": image_steps, "target_faces": target_faces,
+        "image_model": image_model, "image_count": image_count, "multi_views": multi_views,
+        "pixal_low_vram": pixal_low_vram,
     }
     job_id = pipeline.create(title=title.strip(), kind=kind, mode=mode, params=params, input_bytes=content)
+    return {"job_id": job_id, "status": "queued", "url": f"/api/jobs/{job_id}"}
+
+
+@app.post("/api/nextgen/build", status_code=202)
+def build_gallery_views(
+    title: str = Form("流亡战士 · Qwen 四视角重建"),
+    kind: str = Form("character"),
+    target_faces: int = Form(250000),
+) -> dict:
+    if kind not in {"character", "monster"} or not title.strip() or len(title) > 100:
+        raise HTTPException(400, "资产信息无效")
+    if not 1000 <= target_faces <= 500000:
+        raise HTTPException(400, "目标三角面数无效")
+    ensure_tool("pixal3d")
+    ensure_tool("blender")
+    ensure_tool("godot")
+    root = settings.data_root / "validation-assets" / "nextgen" / "qwen"
+    views = {}
+    for name in ("front", "right", "back", "left"):
+        matches = sorted((root / name).glob("*.png"))
+        if len(matches) != 1:
+            raise HTTPException(409, f"参考图 {name} 需要恰好一张已完成原画")
+        path = matches[0]
+        with Image.open(path) as image:
+            image.verify()
+        views[name] = path.read_bytes()
+    job_id = pipeline.create(
+        title=title.strip(), kind=kind, mode="whole",
+        params={
+            "prompt": "同一位暗黑奇幻流亡战士，完整角色，保持装备一致",
+            "rig": False, "num_parts": 3, "seed": 20261118,
+            "image_steps": 28, "target_faces": target_faces,
+            "image_model": "qwen", "image_count": 1, "multi_views": True,
+            "pixal_low_vram": True,
+            "source_gallery": True,
+        },
+        input_bytes=views["front"], reference_views=views,
+    )
     return {"job_id": job_id, "status": "queued", "url": f"/api/jobs/{job_id}"}
 
 
@@ -246,7 +300,12 @@ def list_jobs(limit: int = Query(50, ge=1, le=200)) -> dict:
 @app.get("/api/jobs/{job_id}")
 def job_status(job_id: str) -> dict:
     job = get_job(job_id)
-    return {**job, "has_preview": (job_dir(job_id) / "input.png").is_file()}
+    directory = job_dir(job_id)
+    return {
+        **job,
+        "has_preview": (directory / "input.png").is_file(),
+        "has_fast_preview": (directory / "preview.glb").is_file(),
+    }
 
 
 @app.get("/api/jobs/{job_id}/log", response_class=PlainTextResponse)
@@ -265,20 +324,65 @@ def inspect_job(job_id: str) -> dict:
 
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
-    valid_files = {"model.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "manifest.json"}
+    valid_files = {"model.glb", "preview.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "manifest.json"}
     if file_name not in valid_files:
         raise HTTPException(404, "资源类型不存在")
     path = job_dir(job_id) / file_name
     if not path.is_file():
         raise HTTPException(404, "资源尚未生成")
-    media_type = {"model.glb": "model/gltf-binary", "godot_asset.zip": "application/zip", "input.png": "image/png"}.get(file_name)
+    media_type = {"model.glb": "model/gltf-binary", "preview.glb": "model/gltf-binary", "godot_asset.zip": "application/zip", "input.png": "image/png"}.get(file_name)
     return FileResponse(path, filename=file_name, media_type=media_type)
+
+
+@app.get("/api/jobs/{job_id}/images/{image_name}")
+def job_reference_image(job_id: str, image_name: str) -> FileResponse:
+    if image_name in {"front", "back", "left", "right"}:
+        path = job_dir(job_id) / "views" / f"{image_name}.png"
+    elif image_name in {f"candidate-{number}" for number in range(1, 5)}:
+        path = job_dir(job_id) / "candidates" / f"{image_name}.png"
+    else:
+        raise HTTPException(404, "参考图名称无效")
+    if not path.is_file():
+        raise HTTPException(404, "参考图尚未生成")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/api/jobs/{job_id}/references", response_class=HTMLResponse)
+def job_references(job_id: str) -> str:
+    job = get_job(job_id)
+    root = job_dir(job_id)
+    images = [
+        (key, root / "views" / f"{key}.png") for key in ("front", "right", "back", "left")
+    ] + [
+        (key, root / "candidates" / f"{key}.png") for key in ("candidate-1", "candidate-2", "candidate-3", "candidate-4")
+    ]
+    items = "".join(
+        f'<article><a href="/api/jobs/{job_id}/images/{key}" target="_blank">'
+        f'<img loading="lazy" src="/api/jobs/{job_id}/images/{key}" alt="{key}"></a>'
+        f'<p>{html.escape(key)}</p></article>'
+        for key, path in images if path.is_file()
+    )
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        f'<title>{html.escape(job["title"])} · 参考原画</title><style>'
+        'body{font-family:system-ui,Microsoft YaHei,sans-serif;background:#f3f5fa;color:#233;margin:28px}'
+        'main{max-width:1400px;margin:auto}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px}'
+        'article{background:white;padding:12px;border-radius:12px;box-shadow:0 4px 15px #0001}'
+        'img{width:100%;height:340px;object-fit:contain;background:#eef1f6}p{font-size:13px}'
+        '</style></head><body><main>'
+        f'<h1>{html.escape(job["title"])}</h1><p>原画候选与四视角真实生成结果</p>'
+        f'<div class="grid">{items}</div></main></body></html>'
+    )
 
 
 @app.get("/api/assets")
 def list_assets() -> dict:
     return {"assets": [
-        {**job, "has_preview": (settings.jobs_root / job["id"] / "input.png").is_file()}
+        {
+            **job,
+            "has_preview": (settings.jobs_root / job["id"] / "input.png").is_file(),
+            "has_fast_preview": (settings.jobs_root / job["id"] / "preview.glb").is_file(),
+        }
         for job in pipeline.store.list(limit=200) if job["status"] == "completed"
     ]}
 
@@ -292,11 +396,17 @@ def retry(job_id: str) -> dict:
     suffix = ".glb" if job["mode"] == "import" else ".png"
     source = directory / f"input{suffix}"
     contents = source.read_bytes() if source.is_file() else None
+    original_views = {
+        name: (directory / "views" / f"{name}.png").read_bytes()
+        for name in ("front", "right", "back", "left")
+        if (directory / "views" / f"{name}.png").is_file()
+    }
     new_id = pipeline.create(
         title=job["title"], kind=job["kind"], mode=job["mode"],
         params=job["params"], input_bytes=contents,
         reference_image_bytes=(directory / "input.png").read_bytes()
         if job["mode"] == "import" and (directory / "input.png").is_file() else None,
+        reference_views=original_views or None,
     )
     return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
 

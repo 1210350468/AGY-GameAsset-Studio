@@ -2,6 +2,7 @@ from asset_studio.nextgen import (
     ANIMA_MODEL,
     QWEN_MODEL,
     anima_candidates_workflow,
+    qwen_concept_workflow,
     qwen_character_view_workflow,
 )
 
@@ -31,3 +32,12 @@ def test_qwen_reference_connects_using_comfy_autogrow_dotted_key():
     assert workflow["5"]["inputs"]["prompt"].startswith("<image1>")
     assert workflow["6"]["inputs"]["latent_image"] == ["5", 2]
     assert workflow["8"]["inputs"]["images"] == ["7", 0]
+
+
+def test_qwen_can_generate_an_original_concept_without_reference():
+    workflow = qwen_concept_workflow("original fantasy game character concept", 123, steps=25)
+    assert workflow["1"]["inputs"]["unet_name"] == QWEN_MODEL
+    assert workflow["4"]["inputs"]["resolution"] == 1024
+    assert "images.image_1" not in workflow["4"]["inputs"]
+    assert workflow["5"]["inputs"]["steps"] == 25
+    assert workflow["7"]["inputs"]["images"] == ["6", 0]

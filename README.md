@@ -97,9 +97,10 @@ ssh -N -L 127.0.0.1:18333:127.0.0.1:18333 -p <AutoDL-SSH端口> root@<AutoDL-SSH
 
 ## 工作台操作
 
-打开「资产制作」，输入资产名称、类型、描述，可以上传一张 PNG、JPG 或 WEBP 原画。上传原画时可直接制作 3D；使用描述时先经过 WAI 生成原画，再进入 3D 生成。
+打开「资产制作」，输入资产名称、类型、描述，可以上传一张 PNG、JPG 或 WEBP 原画。通过「原画生成模型」下拉栏选择 Qwen-Image 2.1、Anima 2.9B 或 WAI Illustrious v17；配置了 `OPENAI_API_KEY` 后还可选择 GPT Image 2.5 Flare。候选数量支持 1 张或 4 张。上传原画会直接开始建模，勾选「Qwen 四视角增强建模」可生成并使用多角度参考。
 
 - **完整模型**：Pixal3D 生成几何与材质。
+- **多视角完整模型**：Qwen 为选定主原画生成正面、右侧、背面、左侧四张参考图；使用 Pixal3D 的 `inference_mv.py` 与 `pipeline_mv.json` 多视角权重，并将实际参考图与相机参数保存在任务目录。
 - **可拆分部件**：PartCrafter 生成多个独立 GLB 及组合模型。
 - **自动骨骼**：角色与怪物使用 SkinTokens，输入角色和复杂异形时仍需要检查骨骼效果。
 - **Blender**：统一执行减面处理，保留模型骨骼与材质，生成缺失的 UV 并导出 GLB。
@@ -117,6 +118,9 @@ curl -X POST http://127.0.0.1:18333/api/jobs \
   -F 'title=冰霜骑士' \
   -F 'kind=character' \
   -F 'mode=whole' \
+  -F 'image_model=qwen' \
+  -F 'image_count=4' \
+  -F 'multi_views=true' \
   -F 'prompt=anime fantasy hero, full body, silver and blue armor, ice sword' \
   -F 'rig=true'
 ```
@@ -138,6 +142,10 @@ curl -X POST http://127.0.0.1:18333/api/import \
 
 查询任务：`GET /api/jobs/{job_id}`；读取日志：`GET /api/jobs/{job_id}/log`；下载完整资源包：`GET /api/jobs/{job_id}/file/godot_asset.zip`；下载 GLB：`GET /api/jobs/{job_id}/file/model.glb`；下载场景：`GET /api/jobs/{job_id}/file/game_asset.tscn`。
 
+原画模型选项与是否已配置：`GET /api/config`；查看任务的候选原画及多角度参考：`GET /api/jobs/{job_id}/references`；使用已生成的 Qwen 四视角重新建模：`POST /api/nextgen/build`。生成的四视角会通过官方的 Pixal3D 相机样例建立 `transforms.json`，保留参考图供审查。
+
+Pixal3D 的四视角重建使用 `pipeline_mv_cached_birefnet.json`，沿用 Pixal3D 官方单图配置已经支持的 `ZhengPeng7/BiRefNet` 抠图模型。安装过程会将此配置安装到 Pixal3D 权重目录。对已下载齐全的模型，推理时通过 Hugging Face 离线模式读取本地权重。
+
 ## Godot 4 导入
 
 将资源包解压到 Godot 项目的 `res://assets/generated/<资产编号>/`，Godot 会自动导入 `model.glb`。资源包内已包含 `game_asset.tscn`，可以直接添加到游戏场景。静态资产使用盒形碰撞体，角色使用基础胶囊碰撞体。
@@ -145,6 +153,8 @@ curl -X POST http://127.0.0.1:18333/api/import \
 ### 结构检查与网格优化
 
 资产库的 3D 预览支持材质、结构和网格显示模式，自动读取实际 GLB 的开放边界比例、连续网格比例、非流形连接、纹理和骨骼关节数量。质量报告接口为 `GET /api/jobs/{job_id}/inspect`，其中 `review_required` 表示需要进一步检查网格结构。
+
+当完整 GLB 超过 8 MB，工作台会另外生成浏览器用 `preview.glb`，将预览网格控制在较低面数，并将预览贴图最长边缩至 1024 像素。资产库优先加载轻量 GLB，完整分辨率的 `model.glb` 与 Godot 资源包保持原样。轻量文件可通过 `GET /api/jobs/{job_id}/file/preview.glb` 下载。
 
 完整模型在 Blender 减面之前会合并重合的三维顶点，保留原有的 UV、材质和骨骼数据。复杂角色建议使用约 250000 个三角面进行高保真制作。资产库的「重新优化」操作会从原始生成模型重新制作 GLB 和 Godot 资源包，并保留已有原画，接口为 `POST /api/jobs/{job_id}/reprocess`。
 
@@ -174,7 +184,7 @@ bash scripts/start-nextgen-comfy.sh qwen
 /data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model qwen --reference /data/xmu/ym/asset-studio-data/validation-assets/nextgen/anima/选定原画.png --output /data/xmu/ym/asset-studio-data/validation-assets/nextgen
 ```
 
-Anima 生成四张同一主题的候选图，Qwen-Image 2.1 基于选定原画分别生成正面、左侧、背面和右侧参考。多视角图片用于评价外观一致性与单图重建输入的选择；当前 Pixal3D 工作台接口仍按一张输入图片执行三维重建。两套新工作流调用实际 ComfyUI 接口并读取生成的 PNG 文件。
+Anima 生成四张同一主题的候选图，Qwen-Image 2.1 基于选定原画分别生成正面、左侧、背面和右侧参考。工作台现已提供单图建模与 Pixal3D 多视角重建，所有输入与输出均保存为真实文件。
 
 生成的候选图片与多视角参考可以在 [多视角实验画廊](http://127.0.0.1:18333/nextgen) 中查看，也能通过 `GET /api/nextgen/previews` 获取真实文件列表。画廊直接读取已验证的 PNG 文件，页面在现有 Windows SSH 隧道上访问。
 

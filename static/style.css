@@ -44,6 +44,7 @@ input:not([type=checkbox]):not([type=file]),textarea,select{border-radius:10px;b
 .type-choice.selected{background:#f1f0fd;border-color:#7979c8;color:#4f4faa}
 .upload{background:#fafbff;border:1.5px dashed #bec7d8;min-height:125px}
 .field-help{font-size:12px;color:#7f8b9d;line-height:1.7;margin:10px 0 0}
+.image-model-settings{margin-top:7px}.image-multiview{margin-top:14px!important}.model-gallery-shortcut{margin:18px 0 0;display:flex;gap:12px;flex-wrap:wrap;align-items:center}.model-gallery-shortcut a{font-size:12px;color:#5355bb}.model-gallery-shortcut button{font-size:12px;border:1px solid #dbe1f5;border-radius:9px;padding:10px 14px}
 .form-footnote{font-size:11px;color:#96a0af}
 
 /* 创建页面 */

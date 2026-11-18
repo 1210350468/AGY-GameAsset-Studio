@@ -115,6 +115,29 @@ def qwen_character_view_workflow(prompt: str, reference_filename: str, seed: int
     }
 
 
+def qwen_concept_workflow(prompt: str, seed: int, steps: int = 28) -> dict:
+    if not 1 <= steps <= 80:
+        raise ValueError("采样步数超出范围")
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_MODEL, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_TEXT_ENCODER, "type": "qwen_image"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
+        "4": {"class_type": "TextEncodeQwenImage21", "inputs": {
+            "clip": ["2", 0], "vae": ["3", 0], "prompt": prompt,
+            "negative_prompt": "", "resolution": 1024,
+        }},
+        "5": {"class_type": "KSampler", "inputs": {
+            "seed": seed, "steps": steps, "cfg": 1.0, "sampler_name": "euler",
+            "scheduler": "simple", "denoise": 1.0, "model": ["1", 0],
+            "positive": ["4", 0], "negative": ["4", 1], "latent_image": ["4", 2],
+        }},
+        "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["3", 0]}},
+        "7": {"class_type": "SaveImage", "inputs": {
+            "images": ["6", 0], "filename_prefix": "agy_asset_studio/qwen_concept",
+        }},
+    }
+
+
 def get_object_info(endpoint: str) -> dict:
     with httpx.Client(base_url=endpoint, timeout=45) as client:
         response = client.get("/object_info")
