@@ -109,8 +109,11 @@ def render_concept(
             for index in range(candidates):
                 workflow = qwen_concept_workflow(
                     f"One full-body {kind} for a polished dark fantasy action role playing game. "
-                    f"{prompt}. Single subject, isolated clean studio background, clear silhouette, "
-                    "complete visible limbs and equipment, professional game character concept illustration.",
+                    f"{prompt}. Single subject, centered orthographic front character reference, "
+                    "neutral modeling A-pose, arms visibly separated from torso, both legs fully visible and separated, "
+                    "cloak hangs behind the body with clear shoulder attachments, no loose cloth covering legs, "
+                    "feet grounded, complete equipment, realistic anatomy, plain white studio background, "
+                    "no floating accessories, no dramatic camera perspective, professional 3D model reference.",
                     seed + index, steps,
                 )
                 generated = submit_and_download(
@@ -129,23 +132,28 @@ def render_concept(
     return saved
 
 
-def render_reference_views(settings, source: Path, prompt: str, output: Path, seed: int, log) -> list[Path]:
+def render_reference_views(
+    settings, source: Path, prompt: str, output: Path, seed: int, log,
+    view_names: tuple[str, ...] = ("front", "back"),
+) -> list[Path]:
+    if view_names not in {("front", "back"), ("front", "right", "back", "left")}:
+        raise ValueError("多视角模式需为正反双视角或标准四视角")
     gpu_index = int((settings.data_root / "nextgen-qwen-gpu").read_text(encoding="utf-8").strip())
     endpoint = f"http://127.0.0.1:{NEXTGEN_PORTS['qwen']}"
     validate_installed_nodes(endpoint, "qwen")
     require_gpu_headroom("qwen", gpu_index)
     uploaded = upload_reference(endpoint, source)
     saved = []
-    for index, (name, perspective) in enumerate((
-        ("left", "left side"),
-        ("back", "back"), ("right", "right side"),
-    )):
+    perspectives = {"right": "right side", "back": "back", "left": "left side"}
+    for index, name in enumerate(name for name in view_names if name != "front"):
+        perspective = perspectives[name]
         workflow = qwen_character_view_workflow(
             f"<image1> Produce a strict {perspective} turntable reference of this same game asset. "
             f"Preserve every recognizable feature of the source asset. {prompt}. "
-            "Fixed elevation at eye level, fixed camera distance, 20 degree field of view, "
-            "standing neutral A-pose with arms separated from torso, unchanged body and armor proportions, "
-            "same outfit, colors and fabric, centered full body including shoes, bright white studio background, "
+            "Preserve the exact body pose, limb spacing, head direction and feet placement from image1. "
+            "Fixed elevation at eye level and fixed camera distance, orthographic camera, "
+            "unchanged body and armor proportions, no invented armor pieces or weapons, "
+            "same outfit, colors, cape attachment and fabric, centered full body including shoes, bright white studio background, "
             "single camera view, no perspective foreshortening, no labels, no additional subjects.",
             uploaded, seed + index,
         )

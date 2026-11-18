@@ -82,7 +82,7 @@ function syncImageSelection() {
   $("#image-model").disabled = uploaded;
   $("#image-count").disabled = uploaded;
   $("#image-model-notice").textContent = uploaded
-    ? "已选择参考图片，直接使用上传原画进行三维建模；可以单独开启四视角增强。"
+    ? "已选择参考图片，直接使用上传原画进行三维建模；可以开启正反双视角增强。"
     : "原画模型决定实际调用的生成服务。四张候选会全部保存，默认使用第一张建模。";
 }
 
@@ -157,13 +157,14 @@ async function refreshJobs() {
   const data = await api("/api/jobs?limit=100");
   const activeCount = data.jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
   const completedCount = data.jobs.filter((job) => job.status === "completed").length;
+  const reviewCount = data.jobs.filter((job) => job.status === "review_required").length;
   const failedCount = data.jobs.filter((job) => job.status === "failed").length;
   $("#job-count").textContent = activeCount;
   if (currentPage !== "jobs") return;
-  $("#job-summary").innerHTML = `<div><small>队列与进行中</small><strong>${activeCount}</strong></div><div><small>已完成的资产</small><strong>${completedCount}</strong></div><div><small>异常任务</small><strong>${failedCount}</strong></div>`;
+  $("#job-summary").innerHTML = `<div><small>队列与进行中</small><strong>${activeCount}</strong></div><div><small>已完成的资产</small><strong>${completedCount}</strong></div><div><small>等待外观审核</small><strong>${reviewCount}</strong></div><div><small>异常任务</small><strong>${failedCount}</strong></div>`;
   const filtered = data.jobs.filter((job) => jobFilter === "all" || (jobFilter === "active" ? ["queued", "running"].includes(job.status) : job.status === jobFilter));
   $("#job-list").innerHTML = filtered.length ? filtered.map((job) => {
-    const status = {queued: "等待处理", running: "正在制作", completed: "已完成", failed: "失败"}[job.status] ?? job.status;
+    const status = {queued: "等待处理", running: "正在制作", completed: "已完成", review_required: "等待外观审核", rejected: "外观不合格", failed: "失败"}[job.status] ?? job.status;
     const fileUrl = `/api/jobs/${job.id}/file/`;
     return `<article class="job-card">
       <div class="job-head"><strong>${escapeHtml(job.title)}</strong><span class="label-state ${escapeHtml(job.status)}">${status}</span></div>
@@ -172,10 +173,11 @@ async function refreshJobs() {
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}
       <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button>
-      ${job.status === "completed" ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a>` : ""}
+      ${["completed", "review_required", "rejected"].includes(job.status) ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a>` : ""}
+      ${job.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${job.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${job.id}">外观不合格</button>` : ""}
       ${job.params?.multi_views ? `<a class="link-btn" href="/api/jobs/${job.id}/references" target="_blank">多视角参考</a>` : ""}
-      ${["completed", "failed"].includes(job.status) ? `<button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
-      ${["failed", "completed"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
+      ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
+      ${["failed", "completed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
     </article>`;
   }).join("") : `<div class="panel muted">当前筛选条件下没有任务。</div>`;
 }
@@ -198,8 +200,8 @@ function renderAssets() {
   $("#asset-list").innerHTML = assets.length ? assets.map((asset) => {
     const url = `/api/jobs/${asset.id}/file/`;
     return `<article class="asset-card"><div class="asset-thumb">${asset.has_preview ? `<img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}">` : `<div class="asset-thumb-empty">3D</div>`}<span class="asset-kind-tag">${escapeHtml(types[asset.kind] ?? asset.kind)}</span></div>
-    <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${asset.mode === "parts" ? "独立部件" : asset.mode === "import" ? "GLB 导入" : "完整三维模型"} · ${escapeHtml(asset.created_at.slice(0, 10))}</p>
-      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button></div></div></article>`;
+    <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${asset.mode === "parts" ? "独立部件" : asset.mode === "import" ? "GLB 导入" : "完整三维模型"} · ${escapeHtml(asset.created_at.slice(0, 10))}${asset.status === "review_required" ? " · 等待外观审核" : asset.status === "rejected" ? " · 外观不合格" : ""}</p>
+      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button>${asset.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${asset.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${asset.id}">外观不合格</button>` : ""}</div></div></article>`;
   }).join("") : `<div class="panel muted">当前条件下没有可查看的资产。</div>`;
 }
 
@@ -229,6 +231,21 @@ async function refreshSystem() {
 }
 
 document.addEventListener("click", async (event) => {
+  const reviewButton = event.target.closest("[data-review-action]");
+  if (reviewButton) {
+    reviewButton.disabled = true;
+    try {
+      await api(`/api/jobs/${reviewButton.dataset.reviewId}/${reviewButton.dataset.reviewAction}`, {method: "POST"});
+      notify(reviewButton.dataset.reviewAction === "approve" ? "资产已通过外观审核" : "资产已标记为外观不合格");
+      assetsSignature = "";
+      await refreshJobs();
+      await refreshAssets();
+    } catch (error) {
+      notify(error.message);
+      reviewButton.disabled = false;
+    }
+    return;
+  }
   const assetLink = event.target.closest('a[href^="/?asset="]');
   if (assetLink) {
     event.preventDefault();
@@ -408,9 +425,13 @@ async function openViewer(id, title, hasPreview = true, hasFastPreview = false) 
     if (viewer !== active) return;
     const edges = (quality.boundary_edge_ratio * 100).toFixed(2);
     const connected = (quality.largest_component_ratio * 100).toFixed(1);
-    const reasons = [...new Set([...(quality.game_readiness_reasons || []), ...(quality.review_reasons || [])])];
-    const needsReview = quality.game_ready === false || quality.review_required;
-    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${needsReview ? "网格需要修复" : "网格检查通过"}</strong><span>依据实际 GLB 网格统计</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div></div>${reasons.length ? `<div class="quality-reasons">${reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
+    const appearance = quality.appearance;
+    const reasons = [...new Set([...(quality.game_readiness_reasons || []), ...(quality.review_reasons || []), ...(appearance?.review_reasons || [])])];
+    const needsRepair = quality.game_ready === false;
+    const needsVisualReview = quality.visual_review_required;
+    const assessment = needsRepair ? "网格结构需要修复" : needsVisualReview ? "结构检查通过 · 外观等待审核" : "网格结构检查通过";
+    const silhouette = appearance ? `<div><small>原画轮廓匹配</small><strong>${(appearance.silhouette_iou * 100).toFixed(1)}%</strong></div>` : "";
+    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${assessment}</strong><span>结构指标与实际造型分别验收</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div>${silhouette}</div>${reasons.length ? `<div class="quality-reasons">${reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
   }).catch((error) => { if (viewer === active) $("#viewer-quality").textContent = `质量检查失败：${error.message}`; });
   function render() {
     if (!viewer || viewer.renderer !== renderer) return;

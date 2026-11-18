@@ -161,6 +161,7 @@ async def create_job(
     image_model: str = Form("qwen"),
     image_count: int = Form(1),
     multi_views: bool = Form(False),
+    multi_view_strategy: str = Form("front-back"),
     pixal_low_vram: bool = Form(True),
 ) -> dict:
     if kind not in {"character", "monster", "weapon", "equipment", "prop", "scene"}:
@@ -175,6 +176,8 @@ async def create_job(
         raise HTTPException(400, "原画候选数需为 1 张或 4 张")
     if multi_views and mode != "whole":
         raise HTTPException(400, "多视角建模需要使用 Pixal3D 完整模型")
+    if multi_view_strategy not in {"front-back", "four"}:
+        raise HTTPException(400, "未知的多视角建模方式")
     if not title.strip() or len(title) > 100 or len(prompt) > 3000:
         raise HTTPException(400, "标题或描述长度无效")
     if not (1 <= num_parts <= 16 and 1 <= image_steps <= 80 and 0 <= seed <= 2**32 - 1 and 1000 <= target_faces <= 500000):
@@ -220,6 +223,7 @@ async def create_job(
         "prompt": prompt.strip(), "rig": rig, "num_parts": num_parts,
         "seed": seed, "image_steps": image_steps, "target_faces": target_faces,
         "image_model": image_model, "image_count": image_count, "multi_views": multi_views,
+        "multi_view_strategy": multi_view_strategy,
         "pixal_low_vram": pixal_low_vram,
     }
     job_id = pipeline.create(title=title.strip(), kind=kind, mode=mode, params=params, input_bytes=content)
@@ -256,6 +260,7 @@ def build_gallery_views(
             "rig": False, "num_parts": 3, "seed": 20261118,
             "image_steps": 28, "target_faces": target_faces,
             "image_model": "qwen", "image_count": 1, "multi_views": True,
+            "multi_view_strategy": "four",
             "pixal_low_vram": True,
             "source_gallery": True,
         },
@@ -308,6 +313,7 @@ def job_status(job_id: str) -> dict:
         **job,
         "has_preview": (directory / "input.png").is_file(),
         "has_fast_preview": (directory / "preview.glb").is_file(),
+        "appearance_report_available": (directory / "appearance_quality.json").is_file(),
     }
 
 
@@ -323,9 +329,16 @@ def inspect_job(job_id: str) -> dict:
     directory = job_dir(job_id)
     model = directory / "model.glb"
     if model.is_file():
-        if job["mode"] == "whole" or job["params"].get("strict_geometry"):
-            return inspect_game_mesh_quality(model)
-        return inspect_model(model)
+        quality = inspect_game_mesh_quality(model) if job["mode"] == "whole" or job["params"].get("strict_geometry") else inspect_model(model)
+        report = directory / "appearance_quality.json"
+        if report.is_file():
+            quality["appearance"] = json.loads(report.read_text(encoding="utf-8"))
+        quality["visual_review_required"] = (
+            job["kind"] in {"character", "monster"}
+            and (job["status"] != "completed" or not report.is_file())
+        )
+        quality["quality_scope"] = "网格结构与原画轮廓；人物比例、服装结构和材质细节需要人工审核"
+        return quality
     report = directory / "raw_quality.json"
     if report.is_file():
         return assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8")))
@@ -334,7 +347,7 @@ def inspect_job(job_id: str) -> dict:
 
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
-    valid_files = {"model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "raw_quality.json", "processed_quality.json", "preview_quality.json", "manifest.json"}
+    valid_files = {"model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "raw_quality.json", "processed_quality.json", "preview_quality.json", "appearance_quality.json", "manifest.json"}
     if file_name not in valid_files:
         raise HTTPException(404, "资源类型不存在")
     path = job_dir(job_id) / file_name
@@ -393,14 +406,35 @@ def list_assets() -> dict:
             "has_preview": (settings.jobs_root / job["id"] / "input.png").is_file(),
             "has_fast_preview": (settings.jobs_root / job["id"] / "preview.glb").is_file(),
         }
-        for job in pipeline.store.list(limit=200) if job["status"] == "completed"
+        for job in pipeline.store.list(limit=200) if job["status"] in {"completed", "review_required", "rejected"}
     ]}
+
+
+@app.post("/api/jobs/{job_id}/approve")
+def approve_asset(job_id: str) -> dict:
+    job = get_job(job_id)
+    if job["status"] != "review_required":
+        raise HTTPException(409, "该资产当前没有等待审核")
+    directory = job_dir(job_id)
+    if not (directory / "godot_asset.zip").is_file():
+        raise HTTPException(409, "Godot 资源包尚未完成")
+    pipeline.store.update(job_id, status="completed", stage="外观已人工审核", progress=1.0)
+    return {"job_id": job_id, "status": "completed"}
+
+
+@app.post("/api/jobs/{job_id}/reject")
+def reject_asset(job_id: str) -> dict:
+    job = get_job(job_id)
+    if job["status"] != "review_required":
+        raise HTTPException(409, "该资产当前没有等待审核")
+    pipeline.store.update(job_id, status="rejected", stage="外观不符合要求", progress=1.0)
+    return {"job_id": job_id, "status": "rejected"}
 
 
 @app.post("/api/jobs/{job_id}/retry", status_code=202)
 def retry(job_id: str) -> dict:
     job = get_job(job_id)
-    if job["status"] not in {"failed", "completed"}:
+    if job["status"] not in {"failed", "completed", "review_required", "rejected"}:
         raise HTTPException(409, "任务正在执行")
     directory = settings.jobs_root / job_id
     suffix = ".glb" if job["mode"] == "import" else ".png"
@@ -411,9 +445,12 @@ def retry(job_id: str) -> dict:
         for name in ("front", "right", "back", "left")
         if (directory / "views" / f"{name}.png").is_file()
     }
+    params = dict(job["params"])
+    if job["status"] == "rejected":
+        params["seed"] = (int(params.get("seed", 42)) + 1) % (2 ** 32)
     new_id = pipeline.create(
         title=job["title"], kind=job["kind"], mode=job["mode"],
-        params=job["params"], input_bytes=contents,
+        params=params, input_bytes=contents,
         reference_image_bytes=(directory / "input.png").read_bytes()
         if job["mode"] == "import" and (directory / "input.png").is_file() else None,
         reference_views=original_views or None,
@@ -424,7 +461,7 @@ def retry(job_id: str) -> dict:
 @app.post("/api/jobs/{job_id}/reprocess", status_code=202)
 def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
     job = get_job(job_id)
-    if job["status"] not in {"completed", "failed"}:
+    if job["status"] not in {"completed", "failed", "review_required", "rejected"}:
         raise HTTPException(409, "请选择已经完成或执行失败的资产任务")
     source_dir = job_dir(job_id)
     candidates = (

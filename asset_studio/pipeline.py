@@ -21,6 +21,7 @@ from asset_studio.nextgen import require_gpu_headroom as require_nextgen_gpu_hea
 from asset_studio.views import prepare_pixal_views
 from asset_studio.quality import inspect_model
 from asset_studio.quality_gate import inspect_game_mesh_quality, require_ready_geometry
+from asset_studio.appearance import inspect_silhouette
 from asset_studio.store import Store, timestamp
 
 
@@ -168,18 +169,22 @@ class AssetPipeline:
                     )
 
                 use_multiview = bool(params.get("multi_views"))
+                multi_view_strategy = params.get("multi_view_strategy", "front-back")
+                if multi_view_strategy not in {"front-back", "four"}:
+                    raise ValueError("多视角方式无效")
+                view_names = ("front", "back") if multi_view_strategy == "front-back" else ("front", "right", "back", "left")
                 if use_multiview and not (job_dir / "pixal_views" / "transforms.json").is_file():
                     views = job_dir / "views"
-                    if not all((views / f"{name}.png").is_file() for name in ("front", "right", "back", "left")):
+                    if not all((views / f"{name}.png").is_file() for name in view_names):
                         gpu_index = int((settings.data_root / "nextgen-qwen-gpu").read_text(encoding="utf-8").strip())
                         try:
                             require_nextgen_gpu_headroom("qwen", gpu_index)
                         except RuntimeError as error:
                             raise GpuCapacityBusy(str(error)) from error
-                        self._stage(job_id, "Qwen 生成四视角参考", 0.27)
+                        self._stage(job_id, "Qwen 生成多视角建模参考", 0.27)
                         views.mkdir(exist_ok=True)
-                        render_reference_views(settings, concept, params["prompt"], views, params["seed"], log)
-                    prepare_pixal_views(settings.pixal_repo, views, job_dir / "pixal_views")
+                        render_reference_views(settings, concept, params["prompt"], views, params["seed"], log, view_names)
+                    prepare_pixal_views(settings.pixal_repo, views, job_dir / "pixal_views", view_names)
 
                 if job["mode"] == "whole":
                     generated = job_dir / "generated.glb"
@@ -277,6 +282,20 @@ class AssetPipeline:
             if strict_geometry:
                 require_ready_geometry(final_quality)
 
+            if job["kind"] in {"character", "monster"} and (job_dir / "input.png").is_file():
+                self._stage(job_id, "检查三维模型与原画轮廓", 0.85)
+                silhouettes = job_dir / "silhouettes"
+                self._command(
+                    [blender, "--background", "--python-exit-code", "1", "--python",
+                     str(settings.root / "blender" / "render_silhouettes.py"), "--",
+                     "--input", str(final_model), "--output", str(silhouettes)],
+                    cwd=job_dir, log=log, env={"CUDA_VISIBLE_DEVICES": ""},
+                )
+                appearance = inspect_silhouette(job_dir / "input.png", silhouettes)
+                (job_dir / "appearance_quality.json").write_text(
+                    json.dumps(appearance, ensure_ascii=False, indent=2), encoding="utf-8",
+                )
+
             if final_model.stat().st_size > 8_000_000:
                 self._stage(job_id, "生成浏览器轻量预览", 0.88)
                 preview = job_dir / "preview.glb"
@@ -315,7 +334,13 @@ class AssetPipeline:
             self._package(job, job_dir, final_model)
             self._stage(job_id, "Godot 场景创建与导入验证", 0.97)
             self._godot_stage(job, job_dir, log)
-            self.store.update(job_id, status="completed", stage="completed", progress=1.0)
+            review = (job_dir / "appearance_quality.json").is_file()
+            self.store.update(
+                job_id,
+                status="review_required" if review else "completed",
+                stage="等待检查角色造型与材质" if review else "completed",
+                progress=1.0,
+            )
 
     def _godot_stage(self, job: dict[str, Any], job_dir: Path, log) -> None:
         executable = self.settings.godot_binary()
@@ -357,10 +382,14 @@ class AssetPipeline:
             raise ValueError("GLB 无有效三角面，模型验收失败")
         gltf = GLTF2().load(str(final_model))
         quality = inspect_model(final_model)
+        appearance_path = job_dir / "appearance_quality.json"
+        appearance = json.loads(appearance_path.read_text(encoding="utf-8")) if appearance_path.is_file() else None
         has_skeleton = quality["skinned"]
         if job["params"].get("rig") and not has_skeleton:
             raise ValueError("自动骨骼任务导出的 GLB 缺少 skin，模型验收失败")
         quality["bounds"] = scene.bounds.tolist()
+        quality["appearance"] = appearance
+        quality["review_required"] = bool(appearance)
         (job_dir / "quality.json").write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
         manifest = {
             "asset_id": job["id"], "title": job["title"], "type": job["kind"],
@@ -370,9 +399,12 @@ class AssetPipeline:
             "animations_included": bool(gltf.animations),
             "image_model": job["params"].get("image_model", "wai"),
             "multi_views": bool(job["params"].get("multi_views", False)),
+            "visual_review_required": bool(appearance),
         }
         (job_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         included = ["model.glb", "quality.json", "manifest.json"]
+        if appearance_path.is_file():
+            included.append("appearance_quality.json")
         if (job_dir / "input.png").exists():
             included.append("input.png")
         for category in ("views", "candidates"):

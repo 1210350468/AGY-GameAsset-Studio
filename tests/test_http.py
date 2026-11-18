@@ -44,4 +44,6 @@ def test_image_selector_validates_input() -> None:
         assert count.status_code == 400
         mode = client.post("/api/jobs", data={"title": "测试模型", "multi_views": "true", "mode": "parts"})
         assert mode.status_code == 400
+        invalid_strategy = client.post("/api/jobs", data={"title": "测试模型", "multi_view_strategy": "left-only"})
+        assert invalid_strategy.status_code == 400
 

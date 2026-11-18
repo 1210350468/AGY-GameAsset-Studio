@@ -70,7 +70,7 @@
       }
       if(quality){
         const info=document.createElement("span");
-        info.textContent=quality.game_ready?"网格质量通过，可提交制作 Godot 资源":"网格需要修复："+(quality.game_readiness_reasons||[]).join("；");
+        info.textContent=quality.game_ready?"网格结构检查通过，角色造型与材质仍需审核":"网格需要修复："+(quality.game_readiness_reasons||[]).join("；");
         content.appendChild(info);
         const button=document.createElement("button");button.textContent="制作可预览的 Godot 游戏资产";
         button.disabled=!quality.game_ready;

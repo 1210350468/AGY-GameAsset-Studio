@@ -47,7 +47,7 @@
             <div><label class="form-label" for="image-model">原画生成模型</label><select name="image_model" id="image-model"><option value="qwen">Qwen-Image 2.1 · 推荐</option><option value="anima">Anima 2.9B · 动漫风格</option><option value="wai">WAI Illustrious v17 · 经典</option><option value="gpt-image">GPT Image 2.5 Flare · 云端</option></select></div>
             <div><label class="form-label" for="image-count">原画候选数量</label><select name="image_count" id="image-count"><option value="1">1 张 · 直接建模</option><option value="4">4 张 · 保存全部候选，首张进入建模</option></select></div>
           </div>
-          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true"><span><strong>Qwen 四视角增强建模</strong><small>自动补充正面、左右侧面与背面，并调用 Pixal3D 多视角重建权重</small></span></label>
+          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true"><span><strong>Qwen 正反双视角建模</strong><small>自动生成站姿一致的背面参考，使用 Pixal3D 官方多视角模型；四视角对照保留在实验页面</small></span></label>
           <p class="field-help" id="image-model-notice">正在检查原画生成模型…</p>
 
           <label class="form-label" for="asset-image">参考图片 <span class="optional">上传图片即可直接进入 3D 建模</span></label>
