@@ -150,6 +150,32 @@ curl -X POST http://127.0.0.1:18333/api/import \
 
 WAI 原画生成按角色、怪物、武器和场景类别安排主体姿态与构图，优先采用单主体、清晰轮廓、纯色背景和柔和光照。重建与质量检查使用真实模型文件，资产库可以对比原画、材质、结构和网格。
 
+### Anima 与 Qwen-Image 2.1 原画对照实验
+
+为了测试多候选原画与多视角一致性，额外部署隔离的 ComfyUI 0.37.4。现有 WAI ComfyUI 0.29.2 与工作台 API 不受影响。
+
+Anima 2.9B 使用完整精度的模型、Qwen3 0.6B 文本编码器与 Qwen-Image VAE；Qwen-Image 2.1 使用完整精度的图像模型、Qwen3-VL 8B 编码器与对应 VAE。原始权重放在 `asset-studio-data/models/nextgen`，通过软链接加载到独立 ComfyUI。
+
+```bash
+cd /data/xmu/ym/services/AGY-GameAsset-Studio
+bash scripts/prepare-nextgen-comfy.sh
+bash scripts/download-nextgen-models.sh all
+
+# 只通过 CPU 检查真实 ComfyUI 的节点与权重注册
+bash scripts/check-nextgen-nodes.sh
+/data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model anima --validate --endpoint http://127.0.0.1:8191
+/data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model qwen --validate --endpoint http://127.0.0.1:8191
+
+# GPU1 空闲显存达到 50000 MiB 后启动独立推理服务
+bash scripts/start-nextgen-comfy.sh
+/data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model anima --output /data/xmu/ym/asset-studio-data/validation-assets/nextgen
+/data/xmu/ym/asset-studio-data/envs/api/bin/python scripts/try-nextgen-models.py --model qwen --reference /data/xmu/ym/asset-studio-data/validation-assets/nextgen/anima/选定原画.png --output /data/xmu/ym/asset-studio-data/validation-assets/nextgen
+```
+
+Anima 生成四张同一主题的候选图，Qwen-Image 2.1 基于选定原画分别生成正面、左侧、背面和右侧参考。多视角图片用于评价外观一致性与单图重建输入的选择；当前 Pixal3D 工作台接口仍按一张输入图片执行三维重建。两套新工作流调用实际 ComfyUI 接口并读取生成的 PNG 文件。
+
+GPU1 推理前通过 `nvidia-smi` 严格检查 50000 MiB 空闲显存条件，低于条件立即退出。科研训练进程保持原样，独立 GPU 推理服务位于 `127.0.0.1:8189`，CPU 节点检查服务位于 `127.0.0.1:8191`。
+
 资源包包含模型、质量检查报告、资产元数据、原画（若提供）及可拆分部件（若有）。骨骼动画重定向、角色战斗状态机、技能逻辑和复杂装备穿模检查在游戏工程内完成。
 
 ## 验证
