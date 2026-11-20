@@ -18,7 +18,7 @@ import trimesh
 
 from asset_studio.pipeline import AssetPipeline
 from asset_studio.image_models import IMAGE_MODELS, MODEL_LABELS, available_models
-from asset_studio.quality_gate import assess_game_mesh_report, inspect_game_mesh_quality
+from asset_studio.quality_gate import inspect_game_mesh_quality
 from asset_studio.quality_gate import require_ready_geometry
 from asset_studio.gpu import memory_headroom
 from asset_studio.quality import inspect_model
@@ -445,7 +445,14 @@ def inspect_job(job_id: str) -> dict:
         return quality
     report = directory / "raw_quality.json"
     if report.is_file():
-        return assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8")), profile=job["kind"])
+        original = next(
+            (path for path in (
+                directory / "generated.glb", directory / "rigged.glb", directory / "input.glb"
+            ) if path.is_file()), None,
+        )
+        if original is None:
+            raise HTTPException(404, "原始三维模型文件不存在")
+        return inspect_game_mesh_quality(original, profile=job["kind"])
     raise HTTPException(404, "尚未生成可检查的三维网格")
 
 
@@ -522,6 +529,11 @@ def approve_asset(job_id: str) -> dict:
     directory = job_dir(job_id)
     if not (directory / "godot_asset.zip").is_file():
         raise HTTPException(409, "Godot 资源包尚未完成")
+    processed = directory / "processed_quality.json"
+    if processed.is_file():
+        quality = json.loads(processed.read_text(encoding="utf-8"))
+        if quality.get("game_ready") is False:
+            raise HTTPException(409, "模型网格仍有待修复问题：" + "；".join(quality["game_readiness_reasons"]))
     pipeline.store.update(job_id, status="completed", stage="外观已人工审核", progress=1.0)
     return {"job_id": job_id, "status": "completed"}
 
@@ -654,7 +666,8 @@ def nextgen_experiments() -> dict:
         experiments.append({
             "mode": mode,
             "finished": report.is_file() and geometry.is_file(),
-            "quality": assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8"))) if report.is_file() else None,
+            "quality": inspect_game_mesh_quality(geometry, profile="character")
+            if report.is_file() and geometry.is_file() else None,
             "model_url": f"/api/nextgen/experiments/{mode}/model.glb" if geometry.is_file() and report.is_file() else None,
         })
     return {"experiments": experiments}

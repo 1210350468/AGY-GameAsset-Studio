@@ -20,7 +20,7 @@ from asset_studio.gpu import GpuCapacityBusy, choose_3d_gpu
 from asset_studio.nextgen import require_gpu_headroom as require_nextgen_gpu_headroom
 from asset_studio.views import prepare_pixal_views
 from asset_studio.quality import inspect_model
-from asset_studio.quality_gate import inspect_game_mesh_quality, require_ready_geometry
+from asset_studio.quality_gate import inspect_game_mesh_quality
 from asset_studio.appearance import inspect_silhouette
 from asset_studio.texture_repair import repair_opaque_atlas
 from asset_studio.store import Store, timestamp
@@ -263,8 +263,9 @@ class AssetPipeline:
             (job_dir / "raw_quality.json").write_text(
                 json.dumps(raw_quality, ensure_ascii=False, indent=2), encoding="utf-8",
             )
-            if strict_geometry:
-                require_ready_geometry(raw_quality)
+            if strict_geometry and not raw_quality["game_ready"]:
+                log.write("原始网格需要修复：" + "；".join(raw_quality["game_readiness_reasons"]) + "\n")
+                log.flush()
 
             preserve_source = job["mode"] == "whole" or bool(params.get("preserve_geometry"))
             self._stage(job_id, "保持原始网格并导出" if preserve_source else "Blender 优化与统一导出", 0.82)
@@ -294,8 +295,9 @@ class AssetPipeline:
             (job_dir / "processed_quality.json").write_text(
                 json.dumps(final_quality, ensure_ascii=False, indent=2), encoding="utf-8",
             )
-            if strict_geometry:
-                require_ready_geometry(final_quality)
+            if strict_geometry and not final_quality["game_ready"]:
+                log.write("输出网格需要修复：" + "；".join(final_quality["game_readiness_reasons"]) + "\n")
+                log.flush()
 
             if job["kind"] in {"character", "monster"} and (job_dir / "input.png").is_file():
                 self._stage(job_id, "检查三维模型与原画轮廓", 0.85)
@@ -331,8 +333,9 @@ class AssetPipeline:
                 (job_dir / "preview_quality.json").write_text(
                     json.dumps(preview_quality, ensure_ascii=False, indent=2), encoding="utf-8",
                 )
-                if strict_geometry:
-                    require_ready_geometry(preview_quality)
+                if strict_geometry and not preview_quality["game_ready"]:
+                    log.write("预览网格需要修复：" + "；".join(preview_quality["game_readiness_reasons"]) + "\n")
+                    log.flush()
                 if preview_quality["faces"] != final_quality["faces"] or preview_quality["non_manifold_edges"] != final_quality["non_manifold_edges"]:
                     raise ValueError("纹理预览处理修改了原始网格拓扑")
                 self._command(
@@ -351,11 +354,14 @@ class AssetPipeline:
             self._godot_stage(job, job_dir, log)
             review = ((job_dir / "appearance_quality.json").is_file()
                       or job["mode"] == "whole"
-                      or bool(params.get("preserve_geometry")))
+                      or bool(params.get("preserve_geometry"))
+                      or (strict_geometry and not final_quality["game_ready"]))
             self.store.update(
                 job_id,
                 status="review_required" if review else "completed",
-                stage="等待检查三维造型、材质与结构" if review else "completed",
+                stage=("网格质量待修复：" + "；".join(final_quality["game_readiness_reasons"])
+                       if strict_geometry and not final_quality["game_ready"] else
+                       "等待检查三维造型、材质与结构" if review else "completed"),
                 progress=1.0,
             )
 
