@@ -18,6 +18,7 @@ def _inspect_cached(filename: str, file_size: int, modified_ns: int) -> dict:
         raise ValueError("GLB 缺少实际三角网格")
 
     mesh_metrics = []
+    all_component_sizes = []
     for source in geometries:
         mesh = source.copy()
         mesh.merge_vertices(merge_tex=True, merge_norm=True)
@@ -28,6 +29,7 @@ def _inspect_cached(filename: str, file_size: int, modified_ns: int) -> dict:
         ).tocsr()
         components, labels = connected_components(graph, directed=False)
         component_sizes = np.bincount(labels)
+        all_component_sizes.extend(component_sizes.tolist())
         edge_counts = np.bincount(mesh.edges_unique_inverse)
         boundary_edges = int(np.count_nonzero(edge_counts == 1))
         irregular_edges = int(np.count_nonzero(edge_counts > 2))
@@ -52,6 +54,17 @@ def _inspect_cached(filename: str, file_size: int, modified_ns: int) -> dict:
     boundary_ratio = boundary_edges / total_edges
     irregular_ratio = non_manifold_edges / total_edges
     largest_ratio = largest_component / faces
+    sorted_component_sizes = sorted(all_component_sizes, reverse=True)
+    component_coverage = {
+        "top_4": round(sum(sorted_component_sizes[:4]) / faces, 5),
+        "top_8": round(sum(sorted_component_sizes[:8]) / faces, 5),
+        "top_16": round(sum(sorted_component_sizes[:16]) / faces, 5),
+        "top_32": round(sum(sorted_component_sizes[:32]) / faces, 5),
+    }
+    fragment_threshold = max(32, round(faces * 0.0002))
+    fragment_ratio = round(
+        sum(size for size in sorted_component_sizes if size < fragment_threshold) / faces, 5,
+    )
     issues = []
     if boundary_ratio > 0.025:
         issues.append("模型存在较多开放边界，可能出现可见缺面")
@@ -69,6 +82,9 @@ def _inspect_cached(filename: str, file_size: int, modified_ns: int) -> dict:
         "geometry_count": len(mesh_metrics),
         "components": sum(mesh["components"] for mesh in mesh_metrics),
         "largest_component_ratio": round(largest_ratio, 5),
+        "component_coverage": component_coverage,
+        "fragment_faces_ratio": fragment_ratio,
+        "largest_component_faces": sorted_component_sizes[:16],
         "boundary_edges": boundary_edges,
         "boundary_edge_ratio": round(boundary_ratio, 5),
         "non_manifold_edges": non_manifold_edges,

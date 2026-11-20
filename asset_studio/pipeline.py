@@ -184,7 +184,10 @@ class AssetPipeline:
                             raise GpuCapacityBusy(str(error)) from error
                         self._stage(job_id, "Qwen 生成多视角建模参考", 0.27)
                         views.mkdir(exist_ok=True)
-                        render_reference_views(settings, concept, params["prompt"], views, params["seed"], log, view_names)
+                        render_reference_views(
+                            settings, concept, params["prompt"], views, params["seed"], log,
+                            view_names, kind=job["kind"],
+                        )
                     prepare_pixal_views(settings.pixal_repo, views, job_dir / "pixal_views", view_names)
 
                 if job["mode"] == "whole":
@@ -256,7 +259,7 @@ class AssetPipeline:
 
             self._stage(job_id, "验证原始几何", 0.76)
             strict_geometry = job["mode"] == "whole" or bool(params.get("strict_geometry"))
-            raw_quality = inspect_game_mesh_quality(generated) if strict_geometry else inspect_model(generated)
+            raw_quality = inspect_game_mesh_quality(generated, profile=job["kind"]) if strict_geometry else inspect_model(generated)
             (job_dir / "raw_quality.json").write_text(
                 json.dumps(raw_quality, ensure_ascii=False, indent=2), encoding="utf-8",
             )
@@ -285,7 +288,7 @@ class AssetPipeline:
                 raise FileNotFoundError(f"Blender 未输出有效 GLB：{final_model}")
 
             final_quality = (
-                inspect_game_mesh_quality(final_model, baseline=raw_quality)
+                inspect_game_mesh_quality(final_model, baseline=raw_quality, profile=job["kind"])
                 if strict_geometry else inspect_model(final_model)
             )
             (job_dir / "processed_quality.json").write_text(
@@ -322,7 +325,7 @@ class AssetPipeline:
                     cwd=job_dir, log=log, env={"PATH": str(node.parent) + os.pathsep + os.environ.get("PATH", "")},
                 )
                 preview_quality = (
-                    inspect_game_mesh_quality(resized, baseline=final_quality)
+                    inspect_game_mesh_quality(resized, baseline=final_quality, profile=job["kind"])
                     if strict_geometry else inspect_model(resized)
                 )
                 (job_dir / "preview_quality.json").write_text(
@@ -346,11 +349,13 @@ class AssetPipeline:
             self._package(job, job_dir, final_model)
             self._stage(job_id, "Godot 场景创建与导入验证", 0.97)
             self._godot_stage(job, job_dir, log)
-            review = (job_dir / "appearance_quality.json").is_file()
+            review = ((job_dir / "appearance_quality.json").is_file()
+                      or job["mode"] == "whole"
+                      or bool(params.get("preserve_geometry")))
             self.store.update(
                 job_id,
                 status="review_required" if review else "completed",
-                stage="等待检查角色造型与材质" if review else "completed",
+                stage="等待检查三维造型、材质与结构" if review else "completed",
                 progress=1.0,
             )
 

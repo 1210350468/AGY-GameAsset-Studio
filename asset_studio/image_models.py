@@ -135,6 +135,7 @@ def render_concept(
 def render_reference_views(
     settings, source: Path, prompt: str, output: Path, seed: int, log,
     view_names: tuple[str, ...] = ("front", "back"),
+    kind: str = "character",
 ) -> list[Path]:
     if view_names not in {("front", "back"), ("front", "right", "back", "left")}:
         raise ValueError("多视角模式需为正反双视角或标准四视角")
@@ -145,16 +146,24 @@ def render_reference_views(
     uploaded = upload_reference(endpoint, source)
     saved = []
     perspectives = {"right": "right side", "back": "back", "left": "left side"}
+    geometry = {
+        "character": "Keep the exact neutral pose, body proportions, clothing layers, boots, hands, weapons, attachments and anatomy.",
+        "monster": "Keep the exact anatomy, stance, number of limbs, appendages, head shape, armor and tail attachments.",
+        "weapon": "Keep the exact blade, grip, guard, handle, pommel, material layers, ornament positions and physical proportions.",
+        "equipment": "Keep the exact armor structure, straps, buckles, fasteners, layered materials and mounting points.",
+        "prop": "Keep the exact assembly, silhouette, mechanical construction, carved details, material colors and physical proportions.",
+        "scene": "Keep the exact architectural structure, entrances, floor boundaries, spatial layout, ornaments and materials.",
+    }[kind]
     for index, name in enumerate(name for name in view_names if name != "front"):
         perspective = perspectives[name]
         workflow = qwen_character_view_workflow(
             f"<image1> Produce a strict {perspective} turntable reference of this same game asset. "
-            f"Preserve every recognizable feature of the source asset. {prompt}. "
-            "Preserve the exact body pose, limb spacing, head direction and feet placement from image1. "
-            "Fixed elevation at eye level and fixed camera distance, orthographic camera, "
-            "unchanged body and armor proportions, no invented armor pieces or weapons, "
-            "same outfit, colors, cape attachment and fabric, centered full body including shoes, bright white studio background, "
-            "single camera view, no perspective foreshortening, no labels, no additional subjects.",
+            f"Preserve every recognizable feature of the source asset. {prompt}. {geometry} "
+            "Rotate the camera around the original object by the corresponding turntable angle. "
+            "Maintain constant camera distance, a fixed elevation and the original framing. "
+            "Maintain exact 3D shape, scale, construction, parts, surfaces and colors across all views. "
+            "Centered entire object, complete silhouette, bright white studio background. "
+            "Single camera view, no perspective foreshortening, no labels and no additional objects.",
             uploaded, seed + index,
         )
         images = submit_and_download(

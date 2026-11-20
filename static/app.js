@@ -89,7 +89,23 @@ function syncImageSelection() {
 $("#model-mode").addEventListener("change", () => {
   if ($("#model-mode").value === "parts") $("#multi-views").checked = false;
   $("#multi-views").disabled = $("#model-mode").value === "parts";
+  syncMultiViewInputs();
 });
+
+function syncMultiViewInputs() {
+  const enabled = $("#multi-views").checked && $("#model-mode").value === "whole";
+  const four = $("#multi-view-strategy").value === "four";
+  $("#multiview-options").hidden = !enabled;
+  $("#multi-view-strategy").disabled = !enabled;
+  $("#view-back").disabled = !enabled;
+  $("#multiview-side-views").hidden = !enabled || !four;
+  $("#view-right").disabled = !enabled || !four;
+  $("#view-left").disabled = !enabled || !four;
+}
+
+$("#multi-views").addEventListener("change", syncMultiViewInputs);
+$("#multi-view-strategy").addEventListener("change", syncMultiViewInputs);
+syncMultiViewInputs();
 
 api("/api/config").then((settings) => {
   for (const model of settings.image_models) {
@@ -102,6 +118,11 @@ api("/api/config").then((settings) => {
   const preferred = settings.image_models.find((model) => model.id === "qwen" && model.available)
     || settings.image_models.find((model) => model.available);
   if (preferred) $("#image-model").value = preferred.id;
+  if (!settings.pixal_multiview_ready) {
+    $("#multi-views").disabled = true;
+    $("#multi-views").checked = false;
+    syncMultiViewInputs();
+  }
   syncImageSelection();
 }).catch((error) => { $("#image-model-notice").textContent = `无法读取模型状态：${error.message}`; });
 
@@ -177,6 +198,8 @@ async function refreshJobs() {
       ${job.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${job.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${job.id}">外观不合格</button>` : ""}
       ${["completed", "review_required", "rejected"].includes(job.status) && ["character", "monster"].includes(job.kind) ? `<button class="link-btn" data-texture-repair="${job.id}">修复黑色贴图残留</button>` : ""}
       ${job.params?.multi_views ? `<a class="link-btn" href="/api/jobs/${job.id}/references" target="_blank">多视角参考</a>` : ""}
+      ${job.has_preview && ["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-rebuild-multiview="${job.id}" data-strategy="front-back">Pixal3D 正反双视角重建</button><button class="link-btn" data-rebuild-multiview="${job.id}" data-strategy="four">Pixal3D 四视角重建</button>` : ""}
+      ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-preserve-high-fidelity="${job.params?.source_job || job.id}">保留高精度原网格并打包</button>` : ""}
       ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
       ${["failed", "completed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
     </article>`;
@@ -202,7 +225,7 @@ function renderAssets() {
     const url = `/api/jobs/${asset.id}/file/`;
     return `<article class="asset-card"><div class="asset-thumb">${asset.has_preview ? `<img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}">` : `<div class="asset-thumb-empty">3D</div>`}<span class="asset-kind-tag">${escapeHtml(types[asset.kind] ?? asset.kind)}</span></div>
     <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${asset.mode === "parts" ? "独立部件" : asset.mode === "import" ? "GLB 导入" : "完整三维模型"} · ${escapeHtml(asset.created_at.slice(0, 10))}${asset.status === "review_required" ? " · 等待外观审核" : asset.status === "rejected" ? " · 外观不合格" : ""}</p>
-      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button>${["character", "monster"].includes(asset.kind) ? `<button class="link-btn" data-texture-repair="${asset.id}">修复黑色贴图残留</button>` : ""}${asset.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${asset.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${asset.id}">外观不合格</button>` : ""}</div></div></article>`;
+      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button>${asset.has_preview ? `<button class="link-btn" data-rebuild-multiview="${asset.id}" data-strategy="four">Pixal3D 四视角重建</button>` : ""}${["character", "monster"].includes(asset.kind) ? `<button class="link-btn" data-texture-repair="${asset.id}">修复黑色贴图残留</button>` : ""}${asset.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${asset.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${asset.id}">外观不合格</button>` : ""}</div></div></article>`;
   }).join("") : `<div class="panel muted">当前条件下没有可查看的资产。</div>`;
 }
 
@@ -232,6 +255,38 @@ async function refreshSystem() {
 }
 
 document.addEventListener("click", async (event) => {
+  const preserveButton = event.target.closest("[data-preserve-high-fidelity]");
+  if (preserveButton) {
+    preserveButton.disabled = true;
+    const params = new FormData();
+    params.set("preserve_geometry", "true");
+    params.set("target_faces", "500000");
+    try {
+      const result = await api(`/api/jobs/${preserveButton.dataset.preserveHighFidelity}/reprocess`, {method: "POST", body: params});
+      notify(`已提交高保真原始模型打包任务：${result.job_id.slice(0, 8)}`);
+      navigate("jobs");
+    } catch (error) {
+      notify(`高保真打包提交失败：${error.message}`, 11000);
+      preserveButton.disabled = false;
+    }
+    return;
+  }
+  const multiviewButton = event.target.closest("[data-rebuild-multiview]");
+  if (multiviewButton) {
+    multiviewButton.disabled = true;
+    const params = new FormData();
+    params.set("multi_view_strategy", multiviewButton.dataset.strategy);
+    params.set("pixal_low_vram", "true");
+    try {
+      const result = await api(`/api/jobs/${multiviewButton.dataset.rebuildMultiview}/rebuild-multiview`, {method: "POST", body: params});
+      notify(`Pixal3D 多视角重建任务已登记：${result.job_id.slice(0, 8)}`);
+      navigate("jobs");
+    } catch (error) {
+      notify(`多视角重建提交失败：${error.message}`, 11000);
+      multiviewButton.disabled = false;
+    }
+    return;
+  }
   const textureButton = event.target.closest("[data-texture-repair]");
   if (textureButton) {
     textureButton.disabled = true;

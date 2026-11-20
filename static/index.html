@@ -47,7 +47,25 @@
             <div><label class="form-label" for="image-model">原画生成模型</label><select name="image_model" id="image-model"><option value="qwen">Qwen-Image 2.1 · 推荐</option><option value="anima">Anima 2.9B · 动漫风格</option><option value="wai">WAI Illustrious v17 · 经典</option><option value="gpt-image">GPT Image 2.5 Flare · 云端</option></select></div>
             <div><label class="form-label" for="image-count">原画候选数量</label><select name="image_count" id="image-count"><option value="1">1 张 · 直接建模</option><option value="4">4 张 · 保存全部候选，首张进入建模</option></select></div>
           </div>
-          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true"><span><strong>Qwen 正反双视角建模</strong><small>自动生成站姿一致的背面参考，使用 Pixal3D 官方多视角模型；四视角对照保留在实验页面</small></span></label>
+          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true"><span><strong>Pixal3D 多视角重建</strong><small>采用 Pixal3D 官方多视角模型，既支持 Qwen 自动生成参考视图，也支持直接上传多视角原画</small></span></label>
+          <div id="multiview-options" class="multiview-options" hidden>
+            <label class="form-label" for="multi-view-strategy">多视角方式</label>
+            <select id="multi-view-strategy" name="multi_view_strategy" disabled>
+              <option value="front-back">正面 + 背面</option>
+              <option value="four">正面 + 右面 + 背面 + 左面</option>
+            </select>
+            <p class="field-help">已有多角度图片可直接上传，正面图放到下方「参考图片」。缺少额外视角时，由 Qwen 生成并等待满足显存条件。</p>
+            <div class="multiview-files">
+              <label class="form-label" for="view-back">背面参考图片</label>
+              <input id="view-back" name="back" type="file" accept="image/png,image/jpeg,image/webp" disabled>
+              <div id="multiview-side-views" hidden>
+                <label class="form-label" for="view-right">右侧参考图片</label>
+                <input id="view-right" name="right" type="file" accept="image/png,image/jpeg,image/webp" disabled>
+                <label class="form-label" for="view-left">左侧参考图片</label>
+                <input id="view-left" name="left" type="file" accept="image/png,image/jpeg,image/webp" disabled>
+              </div>
+            </div>
+          </div>
           <p class="field-help" id="image-model-notice">正在检查原画生成模型…</p>
 
           <label class="form-label" for="asset-image">参考图片 <span class="optional">上传图片即可直接进入 3D 建模</span></label>

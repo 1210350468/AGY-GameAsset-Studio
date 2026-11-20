@@ -44,6 +44,11 @@ input:not([type=checkbox]):not([type=file]),textarea,select{border-radius:10px;b
 .type-choice.selected{background:#f1f0fd;border-color:#7979c8;color:#4f4faa}
 .upload{background:#fafbff;border:1.5px dashed #bec7d8;min-height:125px}
 .field-help{font-size:12px;color:#7f8b9d;line-height:1.7;margin:10px 0 0}
+.multiview-options{margin:14px 0 17px;padding:18px 20px;background:#f7f8ff;border:1px solid #dfe3f5;border-radius:12px}
+.multiview-options select{width:100%;margin-top:6px}
+.multiview-files{display:grid;gap:8px;margin-top:12px}
+.multiview-files .form-label{display:block;margin-top:13px}
+.multiview-files input[type=file]{display:block;width:100%;padding:8px;color:#526383;background:#fff;border:1px solid #e3e7f0;border-radius:8px;font-size:12px}
 .image-model-settings{margin-top:7px}.image-multiview{margin-top:14px!important}.model-gallery-shortcut{margin:18px 0 0;display:flex;gap:12px;flex-wrap:wrap;align-items:center}.model-gallery-shortcut a{font-size:12px;color:#5355bb}.model-gallery-shortcut button{font-size:12px;border:1px solid #dbe1f5;border-radius:9px;padding:10px 14px}
 .form-footnote{font-size:11px;color:#96a0af}
 

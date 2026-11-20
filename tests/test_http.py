@@ -19,6 +19,7 @@ def test_real_http_routes() -> None:
         assert client.get("/api/config").status_code == 200
         models = client.get("/api/config").json()["image_models"]
         assert {model["id"] for model in models} == {"qwen", "anima", "wai", "gpt-image"}
+        assert isinstance(client.get("/api/config").json()["pixal_multiview_ready"], bool)
         assert client.get("/api/assets").json() == {"assets": []}
         assert client.get("/nextgen").status_code == 200
         assert client.get("/api/nextgen/previews").status_code == 200
@@ -35,6 +36,7 @@ def test_missing_job_returns_404() -> None:
         assert client.get("/api/jobs/00000000000000000000000000000000/file/model.glb").status_code == 404
         assert client.get("/api/jobs/00000000000000000000000000000000/file/preview.glb").status_code == 404
         assert client.post("/api/jobs/00000000000000000000000000000000/repair-texture").status_code == 404
+        assert client.post("/api/jobs/00000000000000000000000000000000/rebuild-multiview").status_code == 404
 
 
 def test_image_selector_validates_input() -> None:

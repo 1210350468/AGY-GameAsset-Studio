@@ -61,6 +61,34 @@ def ensure_tool(name: str) -> None:
         raise HTTPException(status_code=503, detail=f"{name} 尚未安装，请运行 AutoDL 安装命令")
 
 
+def ensure_multiview_ready() -> None:
+    ensure_tool("pixal3d")
+    required = (
+        settings.pixal_repo / "inference_mv.py",
+        settings.pixal_model_path / "pipeline_mv_cached_birefnet.json",
+    )
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise HTTPException(status_code=503, detail=f"Pixal3D 多视图模型未安装完整：{missing}")
+
+
+async def read_reference_image(upload: UploadFile) -> bytes:
+    content = await upload.read(25 * 1024 * 1024 + 1)
+    if not content or len(content) > 25 * 1024 * 1024:
+        raise HTTPException(400, "参考图片须为 25MB 以内的有效图片")
+    from PIL import UnidentifiedImageError
+    try:
+        with Image.open(io.BytesIO(content)) as original:
+            if original.width * original.height > 25_000_000:
+                raise HTTPException(400, "图片像素数超过 2500 万")
+            converted = ImageOps.exif_transpose(original).convert("RGBA")
+            output = io.BytesIO()
+            converted.save(output, format="PNG")
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise HTTPException(400, f"图片无法读取：{error}") from error
+
+
 def gpu_info() -> dict:
     executable = shutil.which("nvidia-smi")
     if executable is None:
@@ -138,6 +166,10 @@ def config() -> dict:
         "pixal_low_vram": settings.pixal_low_vram,
         "comfy_url": settings.comfy_url,
         "default_engine": "Godot 4",
+        "pixal_multiview_ready": all(path.is_file() for path in (
+            settings.pixal_repo / "inference_mv.py",
+            settings.pixal_model_path / "pipeline_mv_cached_birefnet.json",
+        )),
         "modes": ["whole", "parts"],
         "image_models": [
             {"id": model, "name": MODEL_LABELS[model], "available": available_models(settings)[model]}
@@ -153,6 +185,9 @@ async def create_job(
     prompt: str = Form(""),
     mode: str = Form("whole"),
     image: UploadFile | None = File(None),
+    back: UploadFile | None = File(None),
+    right: UploadFile | None = File(None),
+    left: UploadFile | None = File(None),
     rig: bool = Form(False),
     num_parts: int = Form(3),
     seed: int = Form(42),
@@ -178,6 +213,15 @@ async def create_job(
         raise HTTPException(400, "多视角建模需要使用 Pixal3D 完整模型")
     if multi_view_strategy not in {"front-back", "four"}:
         raise HTTPException(400, "未知的多视角建模方式")
+    supplied_views = {name: upload for name, upload in (
+        ("back", back), ("right", right), ("left", left)
+    ) if upload is not None and upload.filename}
+    if supplied_views and not multi_views:
+        raise HTTPException(400, "上传多视角参考图时须开启 Pixal3D 多视角")
+    if supplied_views:
+        expected = {"back"} if multi_view_strategy == "front-back" else {"right", "back", "left"}
+        if set(supplied_views) != expected or image is None or not image.filename:
+            raise HTTPException(400, f"多视图参考图需要 front 原画及 {sorted(expected)}")
     if not title.strip() or len(title) > 100 or len(prompt) > 3000:
         raise HTTPException(400, "标题或描述长度无效")
     if not (1 <= num_parts <= 16 and 1 <= image_steps <= 80 and 0 <= seed <= 2**32 - 1 and 1000 <= target_faces <= 500000):
@@ -191,23 +235,17 @@ async def create_job(
     ensure_tool("godot")
     if rig:
         ensure_tool("skintokens")
+    if multi_views:
+        ensure_multiview_ready()
 
     content = None
     if image is not None and image.filename:
-        content = await image.read(25 * 1024 * 1024 + 1)
-        if len(content) > 25 * 1024 * 1024 or not content:
-            raise HTTPException(400, "参考图应为 25MB 以内的有效图片")
-        from PIL import UnidentifiedImageError
-        try:
-            with Image.open(io.BytesIO(content)) as original:
-                if original.width * original.height > 25_000_000:
-                    raise HTTPException(400, "图片像素数超过 2500 万")
-                processed = ImageOps.exif_transpose(original).convert("RGBA")
-                output = io.BytesIO()
-                processed.save(output, format="PNG")
-                content = output.getvalue()
-        except (UnidentifiedImageError, OSError, ValueError) as error:
-            raise HTTPException(400, f"图片无法读取：{error}") from error
+        content = await read_reference_image(image)
+    reference_views = None
+    if supplied_views:
+        reference_views = {"front": content}
+        for name, upload in supplied_views.items():
+            reference_views[name] = await read_reference_image(upload)
     if content is None:
         if not prompt.strip():
             raise HTTPException(400, "请输入原画描述或上传参考图片")
@@ -226,8 +264,65 @@ async def create_job(
         "multi_view_strategy": multi_view_strategy,
         "pixal_low_vram": pixal_low_vram,
     }
-    job_id = pipeline.create(title=title.strip(), kind=kind, mode=mode, params=params, input_bytes=content)
+    job_id = pipeline.create(
+        title=title.strip(), kind=kind, mode=mode, params=params,
+        input_bytes=content, reference_views=reference_views,
+    )
     return {"job_id": job_id, "status": "queued", "url": f"/api/jobs/{job_id}"}
+
+
+@app.post("/api/jobs/{job_id}/rebuild-multiview", status_code=202)
+async def rebuild_multiview(
+    job_id: str,
+    multi_view_strategy: str = Form("front-back"),
+    pixal_low_vram: bool = Form(True),
+    back: UploadFile | None = File(None),
+    right: UploadFile | None = File(None),
+    left: UploadFile | None = File(None),
+) -> dict:
+    source = get_job(job_id)
+    if source["status"] in {"running", "queued"}:
+        raise HTTPException(409, "原始建模任务正在执行")
+    if multi_view_strategy not in {"front-back", "four"}:
+        raise HTTPException(400, "只支持正反双视角或正右背左四视角")
+    ensure_multiview_ready()
+    ensure_tool("blender")
+    ensure_tool("godot")
+    directory = job_dir(job_id)
+    reference = directory / "input.png"
+    if not reference.is_file():
+        raise HTTPException(409, "原任务没有原画，请先上传参考图片")
+    provided = {name: upload for name, upload in (
+        ("back", back), ("right", right), ("left", left)
+    ) if upload is not None and upload.filename}
+    expected = ("front", "back") if multi_view_strategy == "front-back" else ("front", "right", "back", "left")
+    stored = {
+        name: (directory / "views" / f"{name}.png").read_bytes()
+        for name in expected if (directory / "views" / f"{name}.png").is_file()
+    }
+    stored["front"] = reference.read_bytes()
+    for name, upload in provided.items():
+        if name not in expected:
+            raise HTTPException(400, f"{name} 视角与所选模式不符")
+        stored[name] = await read_reference_image(upload)
+    if provided and set(stored) != set(expected):
+        raise HTTPException(400, f"缺少多视角原画：{sorted(set(expected) - set(stored))}")
+    params = dict(source["params"])
+    params.update({
+        "multi_views": True,
+        "multi_view_strategy": multi_view_strategy,
+        "pixal_low_vram": pixal_low_vram,
+        "rig": False,
+        "source_job": job_id,
+        "seed": (int(params.get("seed", 42)) + 1) % (2 ** 32),
+    })
+    views = stored if set(stored) == set(expected) else None
+    new_id = pipeline.create(
+        title=source["title"] + " · Pixal3D 多视图增强",
+        kind=source["kind"], mode="whole", params=params,
+        input_bytes=stored["front"], reference_views=views,
+    )
+    return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
 
 
 @app.post("/api/nextgen/build", status_code=202)
@@ -335,7 +430,7 @@ def inspect_job(job_id: str) -> dict:
     directory = job_dir(job_id)
     model = directory / "model.glb"
     if model.is_file():
-        quality = inspect_game_mesh_quality(model) if job["mode"] == "whole" or job["params"].get("strict_geometry") else inspect_model(model)
+        quality = inspect_game_mesh_quality(model, profile=job["kind"]) if job["mode"] == "whole" or job["params"].get("strict_geometry") else inspect_model(model)
         report = directory / "appearance_quality.json"
         if report.is_file():
             quality["appearance"] = json.loads(report.read_text(encoding="utf-8"))
@@ -350,7 +445,7 @@ def inspect_job(job_id: str) -> dict:
         return quality
     report = directory / "raw_quality.json"
     if report.is_file():
-        return assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8")))
+        return assess_game_mesh_report(json.loads(report.read_text(encoding="utf-8")), profile=job["kind"])
     raise HTTPException(404, "尚未生成可检查的三维网格")
 
 
@@ -496,7 +591,10 @@ def retry(job_id: str) -> dict:
 
 
 @app.post("/api/jobs/{job_id}/reprocess", status_code=202)
-def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
+def reprocess(
+    job_id: str, target_faces: int = Form(0),
+    preserve_geometry: bool = Form(False),
+) -> dict:
     job = get_job(job_id)
     if job["status"] not in {"completed", "failed", "review_required", "rejected"}:
         raise HTTPException(409, "请选择已经完成或执行失败的资产任务")
@@ -519,7 +617,11 @@ def reprocess(job_id: str, target_faces: int = Form(0)) -> dict:
     new_id = pipeline.create(
         title=f"{job['title']} · 网格优化",
         kind=job["kind"], mode="import",
-        params={"rig": False, "target_faces": faces, "source_job": job_id},
+        params={
+            "rig": False, "target_faces": faces, "source_job": job_id,
+            "preserve_geometry": preserve_geometry,
+            "strict_geometry": preserve_geometry,
+        },
         input_bytes=source.read_bytes(), reference_image_bytes=reference_image,
     )
     return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}

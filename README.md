@@ -97,13 +97,14 @@ ssh -N -L 127.0.0.1:18333:127.0.0.1:18333 -p <AutoDL-SSH端口> root@<AutoDL-SSH
 
 ## 工作台操作
 
-打开「资产制作」，输入资产名称、类型、描述，可以上传一张 PNG、JPG 或 WEBP 原画。通过「原画生成模型」下拉栏选择 Qwen-Image 2.1、Anima 2.9B 或 WAI Illustrious v17；配置了 `OPENAI_API_KEY` 后还可选择 GPT Image 2.5 Flare。候选数量支持 1 张或 4 张。上传原画会直接开始建模，勾选「Qwen 四视角增强建模」可生成并使用多角度参考。
+打开「资产制作」，输入资产名称、类型、描述，可以上传 PNG、JPG 或 WEBP 原画。通过「原画生成模型」下拉栏选择 Qwen-Image 2.1、Anima 2.9B 或 WAI Illustrious v17；配置了 `OPENAI_API_KEY` 后还可选择 GPT Image 2.5 Flare。候选数量支持 1 张或 4 张。「Pixal3D 多视角重建」提供正反双视角和标准四视角两种方式。
 
 - **完整模型**：Pixal3D 生成几何与材质。
-- **多视角完整模型**：Qwen 为选定主原画生成正面、右侧、背面、左侧四张参考图；使用 Pixal3D 的 `inference_mv.py` 与 `pipeline_mv.json` 多视角权重，并将实际参考图与相机参数保存在任务目录。
+- **多视角完整模型**：正反双视角或正右背左四视角，可直接上传各方向原画，或使用 Qwen 从主原画生成剩余视角。使用 Pixal3D 的 `inference_mv.py` 与独立多视角权重，并将实际参考图、统一构图与相机参数保存在任务目录。Qwen 生成视角时需要满足 40,000 MiB 的 GPU 空闲显存要求。
 - **可拆分部件**：PartCrafter 生成多个独立 GLB 及组合模型。
 - **自动骨骼**：角色与怪物使用 SkinTokens，输入角色和复杂异形时仍需要检查骨骼效果。
 - **Blender**：统一执行减面处理，保留模型骨骼与材质，生成缺失的 UV 并导出 GLB。
+- **高精度原网格**：对于包含大量独立部件、强行减面破坏结构的 Pixal3D 输出，在任务列表选择「保留高精度原网格并打包」。会原样保留 GLB 的几何与材质并重新进行模型结构与 Godot 导入验收。
 - **Godot 4.7.2**：通过无界面引擎实际导入 GLB，创建含碰撞体的 `game_asset.tscn`，并验证生成的场景能够重新加载。
 - **资产库**：展示成功模型，下载 GLB 和包含元数据的 Godot 资源包。
 
@@ -143,6 +144,10 @@ curl -X POST http://127.0.0.1:18333/api/import \
 查询任务：`GET /api/jobs/{job_id}`；读取日志：`GET /api/jobs/{job_id}/log`；下载完整资源包：`GET /api/jobs/{job_id}/file/godot_asset.zip`；下载 GLB：`GET /api/jobs/{job_id}/file/model.glb`；下载场景：`GET /api/jobs/{job_id}/file/game_asset.tscn`。
 
 原画模型选项与是否已配置：`GET /api/config`；查看任务的候选原画及多角度参考：`GET /api/jobs/{job_id}/references`；使用已生成的 Qwen 四视角重新建模：`POST /api/nextgen/build`。四视角输入统一转成正方形 RGB 图片，处理近乎全不透明的 Alpha，规范主体尺寸。相机矩阵来自 Pixal3D 官方示例，`preflight.json` 记录每张图片的来源、尺寸、透明度和相机角度假设。Qwen 编辑视角的精确相机姿态需要经过几何重建对照评估。
+
+从已有任务重新提交多视图重建：`POST /api/jobs/{job_id}/rebuild-multiview`，表单设置 `multi_view_strategy=front-back` 或 `four`，可选上传 `back`、`right`、`left` 参考图片。服务器复用原任务正面图和已保存的其它视角。新任务保留源任务编号；没有完整视角时 Qwen 在 GPU 显存允许时生成。
+
+对于需要保留完整高精度模型的任务，`POST /api/jobs/{job_id}/reprocess` 提交 `preserve_geometry=true`，将来源 GLB 重新打包并执行严格几何检查。人物与多部件道具使用不同的质量标准；本次按实际高精度 Pixal3D 模型检查连通部件覆盖率、细碎网格、开放边界和非流形边。高精度输出需要人工审核外形、纹理和游戏使用性能。
 
 Pixal3D 的四视角重建使用 `pipeline_mv_cached_birefnet.json`，沿用 Pixal3D 官方单图配置已经支持的 `ZhengPeng7/BiRefNet` 抠图模型。安装过程会将此配置安装到 Pixal3D 权重目录。对已下载齐全的模型，推理时通过 Hugging Face 离线模式读取本地权重。
 

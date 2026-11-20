@@ -39,12 +39,18 @@ with sync_playwright() as playwright:
     page.locator("#image-count").select_option("4")
     page.locator("#multi-views").check()
     assert page.locator("#multi-views").is_checked()
+    assert page.locator("#multiview-options").is_visible()
+    assert page.locator("#view-back").is_enabled()
+    page.locator("#multi-view-strategy").select_option("four")
+    assert page.locator("#view-right").is_enabled()
+    assert page.locator("#view-left").is_enabled()
     assert page.locator("#image-model").input_value() == "anima"
     assert page.locator("#image-count").input_value() == "4"
 
     page.locator("#model-mode").select_option("parts")
     assert page.locator("#multi-views").is_disabled()
     assert not page.locator("#multi-views").is_checked()
+    assert page.locator("#multiview-options").is_hidden()
     page.locator("#model-mode").select_option("whole")
     assert page.locator("#multi-views").is_enabled()
 

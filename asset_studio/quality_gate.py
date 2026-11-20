@@ -9,18 +9,36 @@ MIN_LARGEST_COMPONENT_RATIO = 0.97
 MAX_NON_MANIFOLD_EDGE_RATIO = 0.0035
 MAX_BOUNDARY_EDGE_RATIO = 0.005
 MAX_COMPONENT_LOSS_AFTER_BLENDER = 0.01
+MIN_ASSEMBLY_COVERAGE = 0.94
+MAX_ASSEMBLY_FRAGMENT_RATIO = 0.035
+MAX_ASSEMBLY_NON_MANIFOLD_EDGE_RATIO = 0.01
 
 
-def assess_game_mesh_report(quality: dict, *, baseline: dict | None = None) -> dict:
+def assess_game_mesh_report(
+    quality: dict, *, baseline: dict | None = None, profile: str = "character",
+) -> dict:
     quality = dict(quality)
     issues: list[str] = []
-    if quality["largest_component_ratio"] < MIN_LARGEST_COMPONENT_RATIO:
+    assembled = profile in {"weapon", "equipment", "prop", "scene"}
+    if not assembled and quality["largest_component_ratio"] < MIN_LARGEST_COMPONENT_RATIO:
         issues.append(
             f"最大连续网格比例 {quality['largest_component_ratio']:.2%}，要求至少 {MIN_LARGEST_COMPONENT_RATIO:.0%}"
         )
-    if quality["non_manifold_edge_ratio"] > MAX_NON_MANIFOLD_EDGE_RATIO:
+    if assembled:
+        coverage = quality["component_coverage"]["top_32"]
+        if coverage < MIN_ASSEMBLY_COVERAGE:
+            issues.append(
+                f"多部件资产前 32 个主要部件覆盖率 {coverage:.2%}，要求至少 {MIN_ASSEMBLY_COVERAGE:.0%}"
+            )
+        fragments = quality["fragment_faces_ratio"]
+        if fragments > MAX_ASSEMBLY_FRAGMENT_RATIO:
+            issues.append(
+                f"多部件资产细碎浮空网格面积 {fragments:.2%}，超过 {MAX_ASSEMBLY_FRAGMENT_RATIO:.1%}"
+            )
+    edge_limit = MAX_ASSEMBLY_NON_MANIFOLD_EDGE_RATIO if assembled else MAX_NON_MANIFOLD_EDGE_RATIO
+    if quality["non_manifold_edge_ratio"] > edge_limit:
         issues.append(
-            f"非流形边比例 {quality['non_manifold_edge_ratio']:.3%}，要求不超过 {MAX_NON_MANIFOLD_EDGE_RATIO:.2%}"
+            f"非流形边比例 {quality['non_manifold_edge_ratio']:.3%}，要求不超过 {edge_limit:.2%}"
         )
     if quality["boundary_edge_ratio"] > MAX_BOUNDARY_EDGE_RATIO:
         issues.append(
@@ -39,13 +57,16 @@ def assess_game_mesh_report(quality: dict, *, baseline: dict | None = None) -> d
         if quality["boundary_edges"] > baseline["boundary_edges"] * 2 + 100:
             issues.append("Blender 处理明显增加了开放边界")
 
+    quality["geometry_profile"] = profile
     quality["game_ready"] = len(issues) == 0
     quality["game_readiness_reasons"] = issues
     return quality
 
 
-def inspect_game_mesh_quality(model: Path, *, baseline: dict | None = None) -> dict:
-    return assess_game_mesh_report(inspect_model(model), baseline=baseline)
+def inspect_game_mesh_quality(
+    model: Path, *, baseline: dict | None = None, profile: str = "character",
+) -> dict:
+    return assess_game_mesh_report(inspect_model(model), baseline=baseline, profile=profile)
 
 
 def require_ready_geometry(quality: dict) -> None:
