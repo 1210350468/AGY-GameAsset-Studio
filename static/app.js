@@ -13,6 +13,7 @@ let notificationTimer = null;
 let assetCache = [];
 let assetsSignature = "";
 let jobFilter = "all";
+let pixalMultiviewReady = true;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"})[char]);
@@ -60,6 +61,7 @@ document.querySelectorAll(".type-choice").forEach((element) => element.addEventL
   $("#face-guidance").textContent = canRig
     ? "复杂角色保留约 25 万个三角面，以减少极端减面产生的网格破碎。生成后会检查真实结构。"
     : "静态道具默认以 5 万个三角面为目标，生成后会检查真实结构。";
+  syncProductionPolicy();
 }));
 
 $("#asset-image").addEventListener("change", (event) => {
@@ -82,8 +84,38 @@ function syncImageSelection() {
   $("#image-model").disabled = uploaded;
   $("#image-count").disabled = uploaded;
   $("#image-model-notice").textContent = uploaded
-    ? "已选择参考图片，直接使用上传原画进行三维建模；可以开启正反双视角增强。"
-    : "原画模型决定实际调用的生成服务。四张候选会全部保存，默认使用第一张建模。";
+    ? "这张原画会成为 QImage 多视图的统一正面母版，或成为完整外部多视图的正面参考。"
+    : "正式资产使用 xmu21 QImage 制作原画，检查候选构图和主体完整度后选择建模母版。";
+}
+
+function syncProductionPolicy() {
+  const kind = $("#asset-kind").value;
+  const complexity = $("#asset-complexity").value;
+  const production = $("#quality-target").value === "production";
+  const fourRequired = ["character", "monster", "equipment"].includes(kind)
+    || (["weapon", "prop"].includes(kind) && complexity === "complex");
+  $("#scene-module-wrap").hidden = kind !== "scene";
+  $("#scene-module").required = kind === "scene" && production;
+  if (production) {
+    $("#model-mode").value = "whole";
+    $("#multi-views").disabled = fourRequired && !pixalMultiviewReady;
+    $("#multi-views").checked = fourRequired && pixalMultiviewReady;
+    $("#multi-view-strategy").value = "four";
+    if (fourRequired && $("#view-source").value === "qimage") $("#image-count").value = "4";
+    if ($("#view-source").value === "qimage") $("#image-model").value = "qwen";
+  }
+  const messages = {
+    character: "人物统一采用 QImage 正面母版生成完整正、右、背、左四视图，并独立处理复杂武器和衣甲。",
+    monster: "怪物与首领按完整四视图建立身体、四肢和附属结构，检测网格连片与脚底异常。",
+    equipment: "可穿戴装备使用四视图，检查护甲厚度、背面固定结构及骨骼装配接口。",
+    weapon: complexity === "complex" ? "复杂机关兵器使用四视图并检查零件连接。" : "简单刀剑、枪械形制与长柄武器允许单图建模。",
+    prop: complexity === "complex" ? "复杂机关道具使用四视图并检查构造。" : "简单箱子、灯笼、石碑和器皿允许单图建模。",
+    scene: "城镇及副本按屋顶、门窗、地面、栏杆和植被等独立场景模块制作与拼装。",
+  };
+  $("#asset-production-guidance").textContent = messages[kind];
+  $("#model-mode").disabled = production;
+  syncMultiViewInputs();
+  syncImageSelection();
 }
 
 $("#model-mode").addEventListener("change", () => {
@@ -92,35 +124,35 @@ $("#model-mode").addEventListener("change", () => {
     $("#quality-target").value = "prototype";
   }
   $("#multi-views").disabled = $("#model-mode").value === "parts";
-  syncMultiViewInputs();
+  syncProductionPolicy();
 });
 
-$("#quality-target").addEventListener("change", () => {
-  if ($("#quality-target").value === "production") {
-    $("#model-mode").value = "whole";
-    $("#multi-views").disabled = false;
-    $("#multi-views").checked = true;
-    $("#multi-view-strategy").value = "four";
-  }
-  syncMultiViewInputs();
-});
+$("#quality-target").addEventListener("change", syncProductionPolicy);
+$("#asset-complexity").addEventListener("change", syncProductionPolicy);
+$("#view-source").addEventListener("change", syncProductionPolicy);
 
 function syncMultiViewInputs() {
   const enabled = $("#multi-views").checked && $("#model-mode").value === "whole";
   const four = $("#multi-view-strategy").value === "four";
+  const uploaded = $("#view-source").value === "uploaded";
   $("#multiview-options").hidden = !enabled;
   $("#multi-view-strategy").disabled = !enabled;
-  $("#view-back").disabled = !enabled;
-  $("#multiview-side-views").hidden = !enabled || !four;
-  $("#view-right").disabled = !enabled || !four;
-  $("#view-left").disabled = !enabled || !four;
+  $("#uploaded-view-files").hidden = !enabled || !uploaded;
+  $("#view-back").disabled = !enabled || !uploaded;
+  $("#multiview-side-views").hidden = !enabled || !four || !uploaded;
+  $("#view-right").disabled = !enabled || !four || !uploaded;
+  $("#view-left").disabled = !enabled || !four || !uploaded;
+  $("#multi-source-guidance").textContent = uploaded
+    ? "上传同一对象的正面、右面、背面、左面图片，正面使用主参考图片输入。"
+    : "QImage 从同一正面母版分别生成其他三个角度，自动保存主体尺寸、配色和重复图像检查报告。";
 }
 
 $("#multi-views").addEventListener("change", syncMultiViewInputs);
 $("#multi-view-strategy").addEventListener("change", syncMultiViewInputs);
-syncMultiViewInputs();
+syncProductionPolicy();
 
 api("/api/config").then((settings) => {
+  pixalMultiviewReady = Boolean(settings.pixal_multiview_ready);
   for (const model of settings.image_models) {
     const option = $("#image-model").querySelector(`option[value="${model.id}"]`);
     if (option) {
@@ -131,12 +163,7 @@ api("/api/config").then((settings) => {
   const preferred = settings.image_models.find((model) => model.id === "qwen" && model.available)
     || settings.image_models.find((model) => model.available);
   if (preferred) $("#image-model").value = preferred.id;
-  if (!settings.pixal_multiview_ready) {
-    $("#multi-views").disabled = true;
-    $("#multi-views").checked = false;
-    syncMultiViewInputs();
-  }
-  syncImageSelection();
+  syncProductionPolicy();
 }).catch((error) => { $("#image-model-notice").textContent = `无法读取模型状态：${error.message}`; });
 
 $("#build-sample-views").addEventListener("click", async (event) => {
@@ -156,19 +183,25 @@ $("#build-sample-views").addEventListener("click", async (event) => {
 $("#create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if ($("#quality-target").value === "production") {
-    const uploadIds = ["asset-image", "view-right", "view-back", "view-left"];
+    const kind = $("#asset-kind").value;
+    const complexity = $("#asset-complexity").value;
+    const needsFour = ["character", "monster", "equipment"].includes(kind)
+      || (["weapon", "prop"].includes(kind) && complexity === "complex");
+    const uploaded = $("#view-source").value === "uploaded";
+    const uploadIds = needsFour ? ["asset-image", "view-right", "view-back", "view-left"] : ["asset-image"];
     if (
       $("#model-mode").value !== "whole" ||
-      !$("#multi-views").checked ||
-      $("#multi-view-strategy").value !== "four" ||
-      uploadIds.some((name) => !document.getElementById(name).files.length)
+      (needsFour && (!$("#multi-views").checked || $("#multi-view-strategy").value !== "four")) ||
+      (uploaded && uploadIds.some((name) => !document.getElementById(name).files.length))
     ) {
-      notify("赛季游戏资产需要同一角色的正面、右面、背面和左面四张实际参考图，请上传对应图片。", 11000);
+      notify("当前资产参考图配置不完整，请检查四视图设置或上传对应源图。", 11000);
       return;
     }
   }
   const button = $("#submit-job");
   const form = new FormData(event.target);
+  form.set("mode", $("#model-mode").value);
+  form.set("multi_views", $("#multi-views").checked ? "true" : "false");
   if (!$("#asset-image").files.length) form.delete("image");
   button.disabled = true;
   button.textContent = "正在提交…";
@@ -214,11 +247,12 @@ async function refreshJobs() {
     const fileUrl = `/api/jobs/${job.id}/file/`;
     return `<article class="job-card">
       <div class="job-head"><strong>${escapeHtml(job.title)}</strong><span class="label-state ${escapeHtml(job.status)}">${status}</span></div>
-      <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.params?.quality_target === "production" ? "四视角游戏候选" : "原画实验或历史任务"} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(imageModels[job.params?.image_model] || "已有原画")} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
+      <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.params?.quality_target === "production" ? (job.params?.multi_views ? "四视角赛季候选" : "单图模块候选") : "概念实验或历史任务"} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(imageModels[job.params?.image_model] || "已有原画")} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
+      <div class="job-meta">参考图来源：${job.params?.view_source === "qimage" ? "QImage 同母版生成" : job.params?.view_source === "uploaded" ? "人工确认的外部视图" : "历史任务"} · ${job.params?.multi_views ? "视图在导入前进行一致性测量" : "独立模块原画"}</div>
       ${job.has_preview ? `<a class="job-concept-link" href="${fileUrl}input.png" target="_blank" rel="noopener noreferrer"><img src="${fileUrl}input.png" alt="${escapeHtml(job.title)} 原画" loading="lazy"></a>` : ""}
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}
-      <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button>
+      <div class="job-actions"><button class="link-btn" data-log="${job.id}">查看日志</button><button class="link-btn" data-production-quality="${job.id}">查看原画与三维质量报告</button>
       ${["completed", "review_required", "rejected"].includes(job.status) ? `<a class="link-btn" href="${fileUrl}model.glb">下载 GLB</a><a class="link-btn" href="${fileUrl}godot_asset.zip">下载 Godot 资源包</a><a class="link-btn" href="/?asset=${job.id}">3D 预览</a>` : ""}
       ${job.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${job.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${job.id}">外观不合格</button>` : ""}
       ${["completed", "review_required", "rejected"].includes(job.status) && ["character", "monster"].includes(job.kind) ? `<button class="link-btn" data-texture-repair="${job.id}">修复黑色贴图残留</button>` : ""}
@@ -228,7 +262,7 @@ async function refreshJobs() {
       ${job.has_preview && ["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-rebuild-multiview="${job.id}" data-strategy="front-back">Pixal3D 正反双视角重建</button><button class="link-btn" data-rebuild-multiview="${job.id}" data-strategy="four">Pixal3D 四视角重建</button>` : ""}
       ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-preserve-high-fidelity="${job.params?.source_job || job.id}">保留高精度原网格并打包</button>` : ""}
       ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
-      ${["failed", "completed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div>
+      ${["failed", "completed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-retry="${job.id}">重新执行</button>` : ""}</div><div class="production-quality-panel" hidden></div>
     </article>`;
   }).join("") : `<div class="panel muted">当前筛选条件下没有任务。</div>`;
 }
@@ -282,6 +316,24 @@ async function refreshSystem() {
 }
 
 document.addEventListener("click", async (event) => {
+  const reportButton = event.target.closest("[data-production-quality]");
+  if (reportButton) {
+    const panel = reportButton.closest(".job-card").querySelector(".production-quality-panel");
+    const result = await api(`/api/jobs/${reportButton.dataset.productionQuality}/production-quality`);
+    const concept = result.reports.concept_quality;
+    const turnaround = result.reports.turnaround_quality;
+    const appearance = result.reports.multiview_appearance_quality;
+    const mesh = result.reports.processed_quality;
+    const sections = [];
+    if (concept) sections.push(`<p><strong>QImage 原画：</strong> ${concept.candidates.length} 张候选，构图筛选第 ${concept.selected_candidate} 张。美术细节须审核。</p>`);
+    if (turnaround) sections.push(`<p><strong>参考图一致性：</strong> ${turnaround.preflight_passed ? "几何尺寸和色彩检查通过" : escapeHtml(turnaround.issues.join("；"))}。角度依据：${escapeHtml(turnaround.camera_assumption)}；视角身份需审查。</p>`);
+    if (appearance) sections.push(`<p><strong>真实模型四方向还原：</strong>平均轮廓 ${(appearance.mean_silhouette_iou * 100).toFixed(1)}%，最差 ${(appearance.min_silhouette_iou * 100).toFixed(1)}%；${appearance.multiview_passed ? "达到轮廓阈值" : escapeHtml(appearance.issues.join("；"))}。</p>`);
+    if (mesh) sections.push(`<p><strong>网格：</strong>${mesh.faces.toLocaleString()} 面；${mesh.game_ready === true ? "结构指标满足要求" : "结构仍需修复"}。</p>`);
+    if (!sections.length) sections.push("<p>该任务正在准备原画或三维质量报告。</p>");
+    panel.innerHTML = sections.join("");
+    panel.hidden = false;
+    return;
+  }
   const groundMeshButton = event.target.closest("[data-repair-ground-mesh]");
   if (groundMeshButton) {
     groundMeshButton.disabled = true;

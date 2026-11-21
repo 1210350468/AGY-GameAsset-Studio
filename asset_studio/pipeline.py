@@ -21,10 +21,11 @@ from asset_studio.nextgen import require_gpu_headroom as require_nextgen_gpu_hea
 from asset_studio.views import prepare_pixal_views
 from asset_studio.quality import inspect_model
 from asset_studio.quality_gate import inspect_game_mesh_quality
-from asset_studio.appearance import inspect_silhouette
+from asset_studio.appearance import inspect_silhouette, inspect_multiview_silhouettes
 from asset_studio.texture_repair import repair_opaque_atlas
 from asset_studio.foreground_prep import prepare_clean_foreground
 from asset_studio.ground_artifacts import inspect_ground_artifacts
+from asset_studio.turnaround_quality import write_turnaround_quality
 from asset_studio.store import Store, timestamp
 
 
@@ -141,6 +142,7 @@ class AssetPipeline:
         job_dir = self.settings.jobs_root / job_id
         params = job["params"]
         settings = self.settings
+        use_multiview = bool(params.get("multi_views")) and job["mode"] == "whole"
         with (job_dir / "process.log").open("a", encoding="utf-8") as log:
             log.write(f"[{timestamp()}] {job['title']} : {job['mode']}\n")
             log.flush()
@@ -165,13 +167,22 @@ class AssetPipeline:
                         if not memory["ready"]:
                             raise GpuCapacityBusy(f"WAI 当前 GPU 空闲显存 {memory['free_mib']} MiB，要求 {memory['required_mib']} MiB")
                     self._stage(job_id, f"{model} 生成原画", 0.12)
+                    creation_prompt = params["prompt"]
+                    if job["kind"] == "scene" and params.get("scene_module"):
+                        creation_prompt = (
+                            f"Generate exactly one independent reusable environment module: "
+                            f"{params['scene_module']}. Preserve the architectural connection edges "
+                            f"and complete physical shape. Design brief: {creation_prompt}"
+                        )
                     render_concept(
-                        settings=settings, model=model, prompt=params["prompt"], kind=job["kind"],
+                        settings=settings, model=model, prompt=creation_prompt, kind=job["kind"],
                         seed=params["seed"], steps=params["image_steps"],
                         candidates=params.get("image_count", 1), destination=concept, log=log,
                     )
 
-                use_multiview = bool(params.get("multi_views"))
+                if params.get("quality_target") == "production" and job["kind"] in {"character", "monster", "equipment"}:
+                    if not use_multiview or params.get("multi_view_strategy") != "four":
+                        raise ValueError("正式可动或可穿戴资产要求 Pixal3D 完整四视图")
                 multi_view_strategy = params.get("multi_view_strategy", "front-back")
                 if multi_view_strategy not in {"front-back", "four"}:
                     raise ValueError("多视角方式无效")
@@ -190,6 +201,16 @@ class AssetPipeline:
                             settings, concept, params["prompt"], views, params["seed"], log,
                             view_names, kind=job["kind"],
                         )
+                    self._stage(job_id, "检查 QImage 四视图主体、构图与配色一致性", 0.31)
+                    origin = (
+                        "uploaded_four_view"
+                        if params.get("reference_origin") in {"uploaded_four_view", "explicit_four_view"}
+                        else "qimage_generated"
+                    )
+                    write_turnaround_quality(
+                        {name: views / f"{name}.png" for name in view_names},
+                        job_dir / "turnaround_quality.json", origin=origin,
+                    )
                     prepare_pixal_views(settings.pixal_repo, views, job_dir / "pixal_views", view_names)
 
                 if job["mode"] == "whole":
@@ -356,6 +377,18 @@ class AssetPipeline:
                 (job_dir / "appearance_quality.json").write_text(
                     json.dumps(appearance, ensure_ascii=False, indent=2), encoding="utf-8",
                 )
+                if use_multiview:
+                    multi_appearance = inspect_multiview_silhouettes(
+                        job_dir / "views", silhouettes, view_names,
+                    )
+                    (job_dir / "multiview_appearance_quality.json").write_text(
+                        json.dumps(multi_appearance, ensure_ascii=False, indent=2), encoding="utf-8",
+                    )
+                    if not multi_appearance["multiview_passed"]:
+                        log.write(
+                            "四方向轮廓还原存在问题：" + "；".join(multi_appearance["issues"]) + "\n"
+                        )
+                        log.flush()
 
             if final_model.stat().st_size > 8_000_000:
                 self._stage(job_id, "生成浏览器轻量预览", 0.88)
@@ -400,11 +433,20 @@ class AssetPipeline:
                       or job["mode"] == "whole"
                       or bool(params.get("preserve_geometry"))
                       or (strict_geometry and not final_quality["game_ready"]))
+            multi_appearance_failed = (
+                (job_dir / "multiview_appearance_quality.json").is_file()
+                and not json.loads(
+                    (job_dir / "multiview_appearance_quality.json").read_text(encoding="utf-8")
+                )["multiview_passed"]
+            )
+            if multi_appearance_failed:
+                review = True
             self.store.update(
                 job_id,
                 status="review_required" if review else "completed",
                 stage=("网格质量待修复：" + "；".join(final_quality["game_readiness_reasons"])
                        if strict_geometry and not final_quality["game_ready"] else
+                       "四方向原画轮廓不一致，待修改重建" if multi_appearance_failed else
                        "等待检查三维造型、材质与结构" if review else "completed"),
                 progress=1.0,
             )
@@ -457,6 +499,17 @@ class AssetPipeline:
         quality["bounds"] = scene.bounds.tolist()
         quality["appearance"] = appearance
         quality["review_required"] = bool(appearance)
+        quality_files = (
+            "concept_quality.json",
+            "turnaround_quality.json",
+            "multiview_appearance_quality.json",
+            "ground_repair.json",
+        )
+        production_reports = {
+            name: json.loads((job_dir / name).read_text(encoding="utf-8"))
+            for name in quality_files if (job_dir / name).is_file()
+        }
+        quality["production_reports"] = production_reports
         texture_report = job_dir / "texture_repair.json"
         if texture_report.is_file():
             quality["texture_repair"] = json.loads(texture_report.read_text(encoding="utf-8"))
@@ -469,10 +522,13 @@ class AssetPipeline:
             "animations_included": bool(gltf.animations),
             "image_model": job["params"].get("image_model", "wai"),
             "multi_views": bool(job["params"].get("multi_views", False)),
-            "visual_review_required": bool(appearance),
+            "visual_review_required": bool(appearance) or bool(production_reports),
+            "quality_target": job["params"].get("quality_target", "prototype"),
+            "reference_origin": job["params"].get("reference_origin", "experimental"),
         }
         (job_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         included = ["model.glb", "quality.json", "manifest.json"]
+        included.extend(production_reports)
         if texture_report.is_file():
             included.append("texture_repair.json")
         if appearance_path.is_file():

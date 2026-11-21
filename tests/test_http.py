@@ -57,7 +57,7 @@ def test_image_selector_validates_input() -> None:
             "/api/jobs", data={"title": "测试角色", "quality_target": "production", "mode": "whole"}
         )
         assert single_view_production.status_code == 400
-        assert "四张独立参考图" in single_view_production.json()["detail"]
+        assert "四视图" in single_view_production.json()["detail"]
         predicted_view_production = client.post(
             "/api/jobs", data={
                 "title": "测试角色", "quality_target": "production", "multi_views": "true",
@@ -65,4 +65,20 @@ def test_image_selector_validates_input() -> None:
             },
         )
         assert predicted_view_production.status_code == 400
+        assert "造型描述或正面参考原画" in predicted_view_production.json()["detail"]
+        invalid_scene = client.post(
+            "/api/jobs",
+            data={"title": "场景整图", "kind": "scene", "quality_target": "production", "prompt": "江南古镇"},
+        )
+        assert invalid_scene.status_code == 400
+        assert "独立建筑或地形模块" in invalid_scene.json()["detail"]
+        invalid_equipment = client.post(
+            "/api/jobs",
+            data={
+                "title": "角色甲胄", "kind": "equipment", "quality_target": "production",
+                "prompt": "金丝甲胄",
+            },
+        )
+        assert invalid_equipment.status_code == 400
+        assert "四视图" in invalid_equipment.json()["detail"]
 

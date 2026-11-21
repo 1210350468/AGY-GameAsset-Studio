@@ -83,3 +83,61 @@ def inspect_silhouette(reference: Path, renders: Path) -> dict:
         "review_reasons": ([f"原画轮廓一致性 {score:.1%} 低于 {SILHOUETTE_IOU_MINIMUM:.0%} 验收要求"]
                            if score < SILHOUETTE_IOU_MINIMUM else ["轮廓已检查，盔甲、面部、材质与服饰细节仍需审核"]),
     }
+
+
+def inspect_multiview_silhouettes(
+    references: Path,
+    renders: Path,
+    view_names: tuple[str, ...] = ("front", "right", "back", "left"),
+) -> dict:
+    azimuths = {"front": 0, "right": 90, "back": 180, "left": 270}
+    if not view_names or any(name not in azimuths for name in view_names):
+        raise ValueError("多视图轮廓核对要求标准转台参考角度")
+    masks = {}
+    for name in view_names:
+        with Image.open(references / f"{name}.png") as image:
+            masks[name] = _normalize_subject(_reference_mask(image))
+    projections = {}
+    for azimuth in range(0, 360, 45):
+        with Image.open(renders / f"silhouette_{azimuth:03d}.png") as image:
+            projections[azimuth] = _normalize_subject(_rendered_mask(image))
+
+    candidates = []
+    for offset in range(0, 360, 45):
+        for direction in (1, -1):
+            measured = []
+            for name in view_names:
+                angle = (offset + direction * azimuths[name]) % 360
+                original = masks[name]
+                projected = projections[angle]
+                intersection = int(np.count_nonzero(original & projected))
+                union = int(np.count_nonzero(original | projected))
+                if union == 0:
+                    raise ValueError("模型多视图轮廓比较存在空的投影")
+                measured.append({
+                    "view": name,
+                    "render_azimuth": angle,
+                    "silhouette_iou": round(intersection / union, 5),
+                })
+            average = sum(row["silhouette_iou"] for row in measured) / len(measured)
+            candidates.append((average, offset, direction, measured))
+    average, offset, direction, views = max(candidates, key=lambda item: item[0])
+    minimum = min(view["silhouette_iou"] for view in views)
+    passed = average >= 0.63 and minimum >= 0.46
+    issues = []
+    if average < 0.63:
+        issues.append(f"四个角度的平均轮廓交并比 {average:.1%} 低于 63%")
+    if minimum < 0.46:
+        issues.append(f"最弱视角轮廓交并比 {minimum:.1%} 低于 46%")
+    return {
+        "source": "真实 Pixal3D GLB 的八方向 Blender 投影与原始四视图逐项比较",
+        "comparison_rule": "所有视角使用统一的旋转偏移和固定旋转方向",
+        "azimuth_offset": offset,
+        "azimuth_direction": direction,
+        "mean_silhouette_iou": round(average, 5),
+        "min_silhouette_iou": round(minimum, 5),
+        "views": views,
+        "multiview_passed": passed,
+        "visual_review_required": True,
+        "issues": issues,
+    }

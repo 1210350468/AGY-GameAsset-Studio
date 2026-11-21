@@ -8,6 +8,7 @@ import httpx
 from PIL import Image
 
 from asset_studio.comfy import generate_image
+from asset_studio.concept_quality import select_concept_candidate
 from asset_studio.nextgen import (
     anima_candidates_workflow,
     qwen_character_view_workflow,
@@ -43,7 +44,7 @@ def _save_gpt_image(prompt: str, destination: Path, kind: str, log) -> None:
     if not token:
         raise RuntimeError("未配置 OPENAI_API_KEY，无法调用 GPT Image")
     prompt = (
-        f"Create one highly detailed dark fantasy action RPG game asset concept illustration. {prompt}. "
+        f"Create one detailed Chinese wuxia/xianxia seasonal action RPG game asset reference. {prompt}. "
         "Complete visible subject, clean silhouette, single isolated subject, neutral pose, "
         "studio lighting, white background, consistent materials and believable construction."
     )
@@ -107,13 +108,43 @@ def render_concept(
                 path.rename(directory / f"candidate-{index + 1}.png")
         else:
             for index in range(candidates):
+                descriptions = {
+                    "character": (
+                        "Single adult Chinese wuxia/xianxia martial artist in neutral symmetric A-pose, "
+                        "complete head-to-toe anatomy, separated arms, visible fingers, two separated boots, "
+                        "wearable garments with individually understandable collars, belts, sleeves, fasteners "
+                        "and detachable armor. Leave any weapon to a separate asset. "
+                    ),
+                    "monster": (
+                        "A coherent Chinese mythological enemy creature with fully visible head, torso, limbs "
+                        "and articulated joints, physically plausible feet, all claws and tail attachments "
+                        "separated, balanced neutral pose, no ground plane, no smoke or floating effects. "
+                    ),
+                    "weapon": (
+                        "One complete traditional Chinese weapon, physically plausible blade and handle assembly, "
+                        "full-length isolated product reference, consistent scale and materials. "
+                    ),
+                    "equipment": (
+                        "One detached piece of Chinese martial armor or garment, clear fastening and lining, "
+                        "orthographic product reference, physically plausible thickness and materials. "
+                    ),
+                    "prop": (
+                        "One isolated handcrafted Chinese historical fantasy game prop, clear construction "
+                        "and mechanically plausible distinct parts. "
+                    ),
+                    "scene": (
+                        "One standalone modular Chinese historical environment component with real architectural "
+                        "construction, clear openings and connections, no surrounding terrain or combined scenery. "
+                    ),
+                }
                 workflow = qwen_concept_workflow(
-                    f"One full-body {kind} for a polished dark fantasy action role playing game. "
-                    f"{prompt}. Single subject, centered orthographic front character reference, "
-                    "neutral modeling A-pose, arms visibly separated from torso, both legs fully visible and separated, "
-                    "cloak hangs behind the body with clear shoulder attachments, no loose cloth covering legs, "
-                    "feet grounded, complete equipment, realistic anatomy, plain white studio background, "
-                    "no floating accessories, no dramatic camera perspective, professional 3D model reference.",
+                    "Original high-fidelity Chinese wuxia/xianxia seasonal action RPG modeling reference. "
+                    + descriptions[kind]
+                    + f"Design details: {prompt}. "
+                    + "Full visible subject, centered orthographic frontal studio angle, even daylight, "
+                    + "subtle realistic PBR materials, restrained jade-green, ink-blue and warm gold palette, "
+                    + "uniform pure white background, no floor, no shadow baked into geometry, "
+                    + "no ornate presentation border, no typography, no dramatic perspective.",
                     seed + index, steps,
                 )
                 generated = submit_and_download(
@@ -126,8 +157,12 @@ def render_concept(
     for image in saved:
         with Image.open(image) as source:
             source.verify()
-    shutil.copy2(saved[0], destination)
-    log.write(f"Selected candidate 1 / {len(saved)} for Pixal3D: {destination}\n")
+    selected = select_concept_candidate(
+        saved, destination.parent / "concept_quality.json",
+        animated=kind in {"character", "monster"},
+    )
+    shutil.copy2(selected, destination)
+    log.write(f"Selected source image {selected.name} / {len(saved)} by real foreground and framing checks: {destination}\n")
     log.flush()
     return saved
 
@@ -145,7 +180,7 @@ def render_reference_views(
     require_gpu_headroom("qwen", gpu_index)
     uploaded = upload_reference(endpoint, source)
     saved = []
-    perspectives = {"right": "right side", "back": "back", "left": "left side"}
+    perspectives = {"right": ("90 degrees clockwise", "right profile"), "back": ("180 degrees", "back view"), "left": ("270 degrees clockwise", "left profile")}
     geometry = {
         "character": "Keep the exact neutral pose, body proportions, clothing layers, boots, hands, weapons, attachments and anatomy.",
         "monster": "Keep the exact anatomy, stance, number of limbs, appendages, head shape, armor and tail attachments.",
@@ -155,22 +190,31 @@ def render_reference_views(
         "scene": "Keep the exact architectural structure, entrances, floor boundaries, spatial layout, ornaments and materials.",
     }[kind]
     for index, name in enumerate(name for name in view_names if name != "front"):
-        perspective = perspectives[name]
+        target = output / f"{name}.png"
+        if target.is_file():
+            with Image.open(target) as existing:
+                existing.verify()
+            saved.append(target)
+            log.write(f"Reusing already completed QImage {name} source image: {target}\n")
+            continue
+        angle, perspective = perspectives[name]
         workflow = qwen_character_view_workflow(
-            f"<image1> Produce a strict {perspective} turntable reference of this same game asset. "
-            f"Preserve every recognizable feature of the source asset. {prompt}. {geometry} "
-            "Rotate the camera around the original object by the corresponding turntable angle. "
-            "Maintain constant camera distance, a fixed elevation and the original framing. "
-            "Maintain exact 3D shape, scale, construction, parts, surfaces and colors across all views. "
-            "Centered entire object, complete silhouette, bright white studio background. "
-            "Single camera view, no perspective foreshortening, no labels and no additional objects.",
+            f"<image1> Generate the {perspective} at exactly {angle} from the canonical front view "
+            "of the identical Chinese wuxia/xianxia game asset shown in image 1. "
+            "Treat image 1 as the immutable character design sheet, preserve identity, original anatomy, "
+            "hair shape and exact clothing layers, attached objects, material colors and patterns. "
+            f"{geometry} Original design instructions: {prompt}. "
+            "Fixed eye-level turntable camera, same vertical framing and character scale, neutral A-pose, "
+            "same studio lighting. Back view must show the actual back construction rather than a painted "
+            "version of the front. Side view must show true thickness and fully visible silhouette. "
+            "One full isolated body centered on pure white with no floor or cast shadow. "
+            "No extra arms, mirrored accessories, invented weapons, scenery, text, collage or perspective shift.",
             uploaded, seed + index,
         )
         images = submit_and_download(
             endpoint, workflow, "8", output, 1, "qwen", gpu_index,
             timeout_seconds=settings.timeout_seconds,
         )
-        target = output / f"{name}.png"
         images[0].rename(target)
         saved.append(target)
     front = output / "front.png"

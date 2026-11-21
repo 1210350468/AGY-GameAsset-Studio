@@ -41,27 +41,32 @@
           <input type="hidden" name="kind" id="asset-kind" value="character">
 
           <label class="form-label" for="asset-prompt">创作描述</label>
-          <textarea id="asset-prompt" name="prompt" rows="4" maxlength="3000" placeholder="角色造型、武器、配色和材质。例如：奇幻动漫风格的冰霜骑士，蓝色重甲、白色短发、双手符文巨剑，完整角色，明亮柔和的游戏美术。"></textarea>
+          <textarea id="asset-prompt" name="prompt" rows="4" maxlength="3000" placeholder="例如：天锋门青年刀客，月白内衬、赭红腰封、黛青劲装、铜金护肩，正面完整站姿，衣甲可分离。"></textarea>
 
           <div class="two-col image-model-settings">
             <div><label class="form-label" for="image-model">原画生成模型</label><select name="image_model" id="image-model"><option value="qwen">Qwen-Image 2.1 · 推荐</option><option value="anima">Anima 2.9B · 动漫风格</option><option value="wai">WAI Illustrious v17 · 经典</option><option value="gpt-image">GPT Image 2.5 Flare · 云端</option></select></div>
-            <div><label class="form-label" for="image-count">原画候选数量</label><select name="image_count" id="image-count"><option value="1">1 张 · 直接建模</option><option value="4">4 张 · 保存全部候选，首张进入建模</option></select></div>
+            <div><label class="form-label" for="image-count">原画候选数量</label><select name="image_count" id="image-count"><option value="1">1 张 · 单个候选</option><option value="4" selected>4 张 · 根据实际构图检查选出建模母版</option></select></div>
           </div>
           <label class="form-label" for="quality-target">制作质量标准</label>
           <select name="quality_target" id="quality-target">
-            <option value="production" selected>赛季游戏资产候选 · 需提供四张实际参考图</option>
-            <option value="prototype">概念实验 · 可使用单图或生成参考视角</option>
+            <option value="production" selected>赛季游戏资产 · 按资产类型制作合格参考图</option>
+            <option value="prototype">概念实验 · 允许探索性建模</option>
           </select>
-          <p class="field-help">赛季游戏资产必须具备相互一致的正面、右面、背面和左面参考图。已获得授权的三维模型可通过下方 GLB 导入入口使用。</p>
-          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true" checked><span><strong>Pixal3D 多视角重建</strong><small>赛季资产以四张实际参考图建模，概念实验可使用自动生成视角</small></span></label>
+          <div class="two-col">
+            <div><label class="form-label" for="asset-complexity">结构复杂程度</label><select name="asset_complexity" id="asset-complexity"><option value="standard">普通结构</option><option value="complex">复杂结构 / 关键赛季资产</option></select></div>
+            <div><label class="form-label" for="view-source">参考视图来源</label><select name="view_source" id="view-source"><option value="qimage">xmu21 QImage 自动设计一致性视图</option><option value="uploaded">上传已核实的实际参考图</option></select></div>
+          </div>
+          <div id="scene-module-wrap" hidden><label class="form-label" for="scene-module">独立场景模块名称</label><input id="scene-module" name="scene_module" placeholder="例如：临江州 · 一段青瓦屋檐 / 一扇木制门楼"></div>
+          <p class="field-help" id="asset-production-guidance">角色和怪物采用 QImage 同一母版生成正、右、背、左四视图，再交给 Pixal3D；独立道具与场景模块可使用单图。</p>
+          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true" checked><span><strong>Pixal3D 多视角重建</strong><small>可动人物、怪物和复杂装备使用四个一致视角；普通道具与场景模块按结构决定</small></span></label>
           <div id="multiview-options" class="multiview-options" hidden>
             <label class="form-label" for="multi-view-strategy">多视角方式</label>
             <select id="multi-view-strategy" name="multi_view_strategy" disabled>
               <option value="front-back">正面 + 背面</option>
               <option value="four" selected>正面 + 右面 + 背面 + 左面</option>
             </select>
-            <p class="field-help">已有多角度图片可直接上传，正面图放到下方「参考图片」。缺少额外视角时，由 Qwen 生成并等待满足显存条件。</p>
-            <div class="multiview-files">
+            <p class="field-help" id="multi-source-guidance">QImage 从同一张正面母版分别生成侧面和背面，原画和各视图会保留供检查。</p>
+            <div class="multiview-files" id="uploaded-view-files" hidden>
               <label class="form-label" for="view-back">背面参考图片</label>
               <input id="view-back" name="back" type="file" accept="image/png,image/jpeg,image/webp" disabled>
               <div id="multiview-side-views" hidden>
@@ -72,7 +77,7 @@
               </div>
             </div>
           </div>
-          <p class="field-help" id="image-model-notice">正在检查原画生成模型…</p>
+          <p class="field-help" id="image-model-notice">正在检查 xmu21 QImage 模型…</p>
 
           <label class="form-label" for="asset-image">参考图片 <span class="optional">上传图片即可直接进入 3D 建模</span></label>
           <label class="upload" for="asset-image"><span class="upload-icon">＋</span><span id="upload-text">选择角色原画、装备图片或怪物设定图</span><small>PNG / JPG / WEBP，最多 25MB</small></label>
@@ -96,7 +101,7 @@
 
         <details class="import-panel"><summary>已有 GLB 模型？直接优化并制作游戏资源包</summary><form id="import-form"><label class="form-label" for="import-title">资产名称</label><input id="import-title" name="title" required placeholder="现有模型名称"><label class="form-label" for="import-file">GLB 文件</label><input id="import-file" type="file" name="file" required accept=".glb"><button class="secondary" type="submit">导入并优化模型</button></form></details>
         <div class="model-gallery-shortcut"><a href="/nextgen" target="_blank" rel="noopener">查看已生成的 8 张原画与四视角参考</a><button type="button" id="build-sample-views" class="secondary">用现有 Qwen 四视角建模</button></div></div>
-        <aside class="pipeline-sidebar"><div class="sidebar-card"><div class="sidebar-card-eyebrow">PRODUCTION PIPELINE</div><h3>五阶段自动制作</h3><ol class="pipeline-timeline"><li><span>01</span><div><strong>原画生成</strong><small>Qwen / Anima / WAI / GPT Image</small></div></li><li><span>02</span><div><strong>三维重建</strong><small>Pixal3D 单图 / 多视角 · PartCrafter</small></div></li><li><span>03</span><div><strong>角色绑定</strong><small>SkinTokens 骨骼与蒙皮</small></div></li><li><span>04</span><div><strong>结构优化</strong><small>Blender · UV 与网格检查</small></div></li><li><span>05</span><div><strong>引擎导出</strong><small>Godot · GLB + 场景文件</small></div></li></ol></div><div class="sidebar-note"><strong>质量检查</strong><p>生成的模型会检查开放边界、连接异常、贴图与骨骼。可以在资产预览页面查看完整报告。</p></div></aside></div>
+        <aside class="pipeline-sidebar"><div class="sidebar-card"><div class="sidebar-card-eyebrow">QIMAGE → PIXAL3D</div><h3>七阶段资产制作</h3><ol class="pipeline-timeline"><li><span>01</span><div><strong>角色与模块设定</strong><small>门派服饰、骨骼姿态与组件结构</small></div></li><li><span>02</span><div><strong>QImage 原画候选</strong><small>多候选筛选完整主体及裁切</small></div></li><li><span>03</span><div><strong>一致性参考视图</strong><small>角色四视图 · 简单道具可单图</small></div></li><li><span>04</span><div><strong>Pixal3D 建模</strong><small>多视角重建与面数质量审核</small></div></li><li><span>05</span><div><strong>骨骼与配件</strong><small>SkinTokens · 动作和挂点验收</small></div></li><li><span>06</span><div><strong>多角度结构检查</strong><small>Blender · 轮廓 / 连通性 / 地面残留</small></div></li><li><span>07</span><div><strong>Godot 预览与审核</strong><small>保留原画、GLB 和质量报告</small></div></li></ol></div><div class="sidebar-note"><strong>真实验收</strong><p>每个正式候选保留 QImage 母版、全部参考图及 Pixal3D 四方向轮廓指标。美术审核重点是人物身份、脸部、装备结构、背面连贯性与动作。</p></div></aside></div>
       </section>
 
       <section id="view-jobs" class="view"><div class="section-title"><h2>制作任务</h2><p>真实处理阶段、推理日志与生成文件集中展示。</p></div><div id="job-summary" class="summary-strip"></div><div class="job-filters"><button type="button" class="job-filter active" data-job-filter="all">全部任务</button><button type="button" class="job-filter" data-job-filter="active">正在制作</button><button type="button" class="job-filter" data-job-filter="completed">已完成</button><button type="button" class="job-filter" data-job-filter="failed">异常任务</button></div><div id="job-list" class="stack"></div></section>

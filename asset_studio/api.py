@@ -18,6 +18,7 @@ import trimesh
 
 from asset_studio.pipeline import AssetPipeline
 from asset_studio.image_models import IMAGE_MODELS, MODEL_LABELS, available_models
+from asset_studio.production_policy import resolve_production_policy, validate_production_submission
 from asset_studio.quality_gate import inspect_game_mesh_quality
 from asset_studio.quality_gate import require_ready_geometry
 from asset_studio.gpu import memory_headroom
@@ -196,6 +197,9 @@ async def create_job(
     image_model: str = Form("qwen"),
     image_count: int = Form(1),
     quality_target: str = Form("prototype"),
+    asset_complexity: str = Form("standard"),
+    view_source: str = Form("qimage"),
+    scene_module: str = Form(""),
     multi_views: bool = Form(False),
     multi_view_strategy: str = Form("front-back"),
     pixal_low_vram: bool = Form(True),
@@ -211,8 +215,10 @@ async def create_job(
         raise HTTPException(400, "原画模型无效")
     if image_count not in {1, 4}:
         raise HTTPException(400, "原画候选数需为 1 张或 4 张")
-    if quality_target not in {"prototype", "production"}:
-        raise HTTPException(400, "游戏资产制作类型无效")
+    try:
+        resolve_production_policy(kind, asset_complexity)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
     if multi_views and mode != "whole":
         raise HTTPException(400, "多视角建模需要使用 Pixal3D 完整模型")
     if multi_view_strategy not in {"front-back", "four"}:
@@ -220,19 +226,22 @@ async def create_job(
     supplied_views = {name: upload for name, upload in (
         ("back", back), ("right", right), ("left", left)
     ) if upload is not None and upload.filename}
-    if quality_target == "production" and (
-        mode != "whole"
-        or not multi_views
-        or multi_view_strategy != "four"
-        or set(supplied_views) != {"back", "right", "left"}
-        or image is None
-        or not image.filename
-    ):
-        raise HTTPException(
-            400,
-            "正式游戏建模要求上传同一资产的正面、右面、背面、左面四张独立参考图，"
-            "并启用 Pixal3D 四视角。单图与自动猜测视角归入概念实验。",
+    try:
+        policy = validate_production_submission(
+            kind=kind,
+            complexity=asset_complexity,
+            quality_target=quality_target,
+            view_source=view_source,
+            mode=mode,
+            multi_views=multi_views,
+            multi_view_strategy=multi_view_strategy,
+            supplied_views=set(supplied_views),
+            has_front=bool(image is not None and image.filename),
+            has_prompt=bool(prompt.strip()),
+            scene_module=scene_module,
         )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
     if supplied_views and not multi_views:
         raise HTTPException(400, "上传多视角参考图时须开启 Pixal3D 多视角")
     if supplied_views:
@@ -263,6 +272,12 @@ async def create_job(
         reference_views = {"front": content}
         for name, upload in supplied_views.items():
             reference_views[name] = await read_reference_image(upload)
+    if quality_target == "production" and view_source == "qimage":
+        if not available_models(settings)["qwen"]:
+            raise HTTPException(503, "xmu21 QImage 模型尚未安装完成")
+        if policy.require_multiview and content is None:
+            image_count = 4
+        image_model = "qwen"
     if content is None:
         if not prompt.strip():
             raise HTTPException(400, "请输入原画描述或上传参考图片")
@@ -279,7 +294,15 @@ async def create_job(
         "seed": seed, "image_steps": image_steps, "target_faces": target_faces,
         "image_model": image_model, "image_count": image_count, "multi_views": multi_views,
         "quality_target": quality_target,
-        "reference_origin": "explicit_four_view" if quality_target == "production" else "experimental",
+        "asset_complexity": asset_complexity,
+        "view_source": view_source,
+        "scene_module": scene_module.strip(),
+        "reference_origin": (
+            "qimage_generated" if quality_target == "production" and view_source == "qimage" and multi_views
+            else "uploaded_four_view" if supplied_views
+            else "single_view_module" if quality_target == "production"
+            else "experimental"
+        ),
         "multi_view_strategy": multi_view_strategy,
         "pixal_low_vram": pixal_low_vram,
         "clean_floor_shadow": clean_floor_shadow if kind == "monster" else False,
@@ -548,6 +571,16 @@ def inspect_job(job_id: str) -> dict:
         texture_report = directory / "texture_repair.json"
         if texture_report.is_file():
             quality["texture_repair"] = json.loads(texture_report.read_text(encoding="utf-8"))
+        for report_name in (
+            "concept_quality.json",
+            "turnaround_quality.json",
+            "multiview_appearance_quality.json",
+        ):
+            path = directory / report_name
+            if path.is_file():
+                quality[report_name.removesuffix(".json")] = json.loads(
+                    path.read_text(encoding="utf-8")
+                )
         quality["visual_review_required"] = (
             job["kind"] in {"character", "monster"}
             and (job["status"] != "completed" or not report.is_file())
@@ -567,9 +600,45 @@ def inspect_job(job_id: str) -> dict:
     raise HTTPException(404, "尚未生成可检查的三维网格")
 
 
+@app.get("/api/jobs/{job_id}/production-quality")
+def production_quality(job_id: str) -> dict:
+    job = get_job(job_id)
+    root = job_dir(job_id)
+    reports = {}
+    for name in (
+        "concept_quality",
+        "turnaround_quality",
+        "multiview_appearance_quality",
+        "appearance_quality",
+        "raw_quality",
+        "processed_quality",
+    ):
+        path = root / f"{name}.json"
+        if path.is_file():
+            reports[name] = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        "id": job["id"],
+        "status": job["status"],
+        "quality_target": job["params"].get("quality_target", "prototype"),
+        "asset_complexity": job["params"].get("asset_complexity", "standard"),
+        "reference_origin": job["params"].get("reference_origin", "experimental"),
+        "reports": reports,
+        "ready_for_visual_review": (
+            job["status"] in {"completed", "review_required"}
+            and (root / "model.glb").is_file()
+        ),
+    }
+
+
 @app.get("/api/jobs/{job_id}/file/{file_name}")
 def job_file(job_id: str, file_name: str) -> FileResponse:
-    valid_files = {"model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn", "input.png", "quality.json", "raw_quality.json", "processed_quality.json", "preview_quality.json", "appearance_quality.json", "texture_repair.json", "manifest.json"}
+    valid_files = {
+        "model.glb", "preview.glb", "generated.glb", "godot_asset.zip", "game_asset.tscn",
+        "input.png", "quality.json", "raw_quality.json", "processed_quality.json",
+        "preview_quality.json", "appearance_quality.json", "texture_repair.json",
+        "concept_quality.json", "turnaround_quality.json",
+        "multiview_appearance_quality.json", "manifest.json",
+    }
     if file_name not in valid_files:
         raise HTTPException(404, "资源类型不存在")
     path = job_dir(job_id) / file_name

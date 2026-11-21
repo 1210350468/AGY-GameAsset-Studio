@@ -1,3 +1,4 @@
+.multiview-files[hidden],#uploaded-view-files[hidden],#multiview-options[hidden],#multiview-side-views[hidden],#scene-module-wrap[hidden]{display:none!important}
 :root{font-family:Inter,"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:#f7f8fb;color:#182432;font-synthesis:none}
 *{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}
 .layout{display:flex;min-height:100vh}.sidebar{width:236px;background:#fff;border-right:1px solid #e7ecf2;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:27px 16px;flex-shrink:0}

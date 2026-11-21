@@ -1,5 +1,15 @@
 # AGY 游戏资产工作台
 
+## QImage 2.1 × Pixal3D 国风赛季资产生产
+
+现在使用资产类别专用制作要求：玩家角色、NPC、普通怪物、灵宠、Boss、可穿戴装备和复杂机关使用 QImage 正面、右面、背面、左面四视图；简单刀剑、箱子、石碑、灯笼与独立屋顶、墙体、门窗、道路模块可用单图。完整城镇和副本由多个真实模块拼装。技能效果使用 QImage 概念设计和 Godot 原生粒子、材质动画实现。
+
+- API 参数 quality_target=production/prototype、asset_complexity=standard/complex、view_source=qimage/uploaded 和 scene_module。所有要求在 asset_studio/production_policy.py 进行实际提交检查。
+- QImage 为角色生成四个正面候选，通过 concept_quality.json 的真实图片尺寸、背景、构图和主体完整性指标选择母版；使用相同母版分别生成右面、背面、左面，并用 turnaround_quality.json 检查像素、主体高度、配色与重复图片。
+- Pixal3D 按四视图执行官方 inference_mv.py，输出 GLB 后由 Blender 渲染多个实际方向，在 multiview_appearance_quality.json 中记录四方向平均与最弱轮廓交并比。检查通过的模型还需要实际骨骼、衣甲、面容与动作审核。
+- 任务 GET /api/jobs/{job_id}/production-quality 可查询 QImage、Pixal3D 真实生成阶段的报告，Godot ZIP 同时保存源图、几何报告与视角记录。现有 Pixal3D 相机参数来自官方转台示例，每张视图仍保留进一步审核的相机假设说明。
+- xmu21 的真实任务：4db7e10857ff48029567a29197ca0e1f 为现有 QImage 四视图基准重建；2af9b42ec0cf4d5a8ec4bd0cbe5f78a6 为青岚谷女侠四张 QImage 原画候选、完整多视图和 Pixal3D 重建。使用现有显存保护，避免抢占科研 GPU 显存。
+
 中文游戏资产生产工作台，部署在 xmu21 A800 或 AutoDL GPU 实例中，供浏览器和 AGY 通过统一 HTTP API 提交任务。采用一套二次元图像模型、主力 3D 模型、可拆分部件模型、自动骨骼模型和 Blender，实现从原画到 Godot 资源包的制作流程。
 
 ## xmu21 A800 现用部署
