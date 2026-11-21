@@ -47,12 +47,18 @@
             <div><label class="form-label" for="image-model">原画生成模型</label><select name="image_model" id="image-model"><option value="qwen">Qwen-Image 2.1 · 推荐</option><option value="anima">Anima 2.9B · 动漫风格</option><option value="wai">WAI Illustrious v17 · 经典</option><option value="gpt-image">GPT Image 2.5 Flare · 云端</option></select></div>
             <div><label class="form-label" for="image-count">原画候选数量</label><select name="image_count" id="image-count"><option value="1">1 张 · 直接建模</option><option value="4">4 张 · 保存全部候选，首张进入建模</option></select></div>
           </div>
-          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true"><span><strong>Pixal3D 多视角重建</strong><small>采用 Pixal3D 官方多视角模型，既支持 Qwen 自动生成参考视图，也支持直接上传多视角原画</small></span></label>
+          <label class="form-label" for="quality-target">制作质量标准</label>
+          <select name="quality_target" id="quality-target">
+            <option value="production" selected>赛季游戏资产候选 · 需提供四张实际参考图</option>
+            <option value="prototype">概念实验 · 可使用单图或生成参考视角</option>
+          </select>
+          <p class="field-help">赛季游戏资产必须具备相互一致的正面、右面、背面和左面参考图。已获得授权的三维模型可通过下方 GLB 导入入口使用。</p>
+          <label class="check image-multiview"><input type="checkbox" name="multi_views" id="multi-views" value="true" checked><span><strong>Pixal3D 多视角重建</strong><small>赛季资产以四张实际参考图建模，概念实验可使用自动生成视角</small></span></label>
           <div id="multiview-options" class="multiview-options" hidden>
             <label class="form-label" for="multi-view-strategy">多视角方式</label>
             <select id="multi-view-strategy" name="multi_view_strategy" disabled>
               <option value="front-back">正面 + 背面</option>
-              <option value="four">正面 + 右面 + 背面 + 左面</option>
+              <option value="four" selected>正面 + 右面 + 背面 + 左面</option>
             </select>
             <p class="field-help">已有多角度图片可直接上传，正面图放到下方「参考图片」。缺少额外视角时，由 Qwen 生成并等待满足显存条件。</p>
             <div class="multiview-files">

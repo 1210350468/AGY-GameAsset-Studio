@@ -195,6 +195,7 @@ async def create_job(
     target_faces: int = Form(50000),
     image_model: str = Form("qwen"),
     image_count: int = Form(1),
+    quality_target: str = Form("prototype"),
     multi_views: bool = Form(False),
     multi_view_strategy: str = Form("front-back"),
     pixal_low_vram: bool = Form(True),
@@ -210,6 +211,8 @@ async def create_job(
         raise HTTPException(400, "原画模型无效")
     if image_count not in {1, 4}:
         raise HTTPException(400, "原画候选数需为 1 张或 4 张")
+    if quality_target not in {"prototype", "production"}:
+        raise HTTPException(400, "游戏资产制作类型无效")
     if multi_views and mode != "whole":
         raise HTTPException(400, "多视角建模需要使用 Pixal3D 完整模型")
     if multi_view_strategy not in {"front-back", "four"}:
@@ -217,6 +220,19 @@ async def create_job(
     supplied_views = {name: upload for name, upload in (
         ("back", back), ("right", right), ("left", left)
     ) if upload is not None and upload.filename}
+    if quality_target == "production" and (
+        mode != "whole"
+        or not multi_views
+        or multi_view_strategy != "four"
+        or set(supplied_views) != {"back", "right", "left"}
+        or image is None
+        or not image.filename
+    ):
+        raise HTTPException(
+            400,
+            "正式游戏建模要求上传同一资产的正面、右面、背面、左面四张独立参考图，"
+            "并启用 Pixal3D 四视角。单图与自动猜测视角归入概念实验。",
+        )
     if supplied_views and not multi_views:
         raise HTTPException(400, "上传多视角参考图时须开启 Pixal3D 多视角")
     if supplied_views:
@@ -262,6 +278,8 @@ async def create_job(
         "prompt": prompt.strip(), "rig": rig, "num_parts": num_parts,
         "seed": seed, "image_steps": image_steps, "target_faces": target_faces,
         "image_model": image_model, "image_count": image_count, "multi_views": multi_views,
+        "quality_target": quality_target,
+        "reference_origin": "explicit_four_view" if quality_target == "production" else "experimental",
         "multi_view_strategy": multi_view_strategy,
         "pixal_low_vram": pixal_low_vram,
         "clean_floor_shadow": clean_floor_shadow if kind == "monster" else False,

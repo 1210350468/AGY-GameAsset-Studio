@@ -51,4 +51,18 @@ def test_image_selector_validates_input() -> None:
         assert mode.status_code == 400
         invalid_strategy = client.post("/api/jobs", data={"title": "测试模型", "multi_view_strategy": "left-only"})
         assert invalid_strategy.status_code == 400
+        invalid_target = client.post("/api/jobs", data={"title": "测试模型", "quality_target": "shipping"})
+        assert invalid_target.status_code == 400
+        single_view_production = client.post(
+            "/api/jobs", data={"title": "测试角色", "quality_target": "production", "mode": "whole"}
+        )
+        assert single_view_production.status_code == 400
+        assert "四张独立参考图" in single_view_production.json()["detail"]
+        predicted_view_production = client.post(
+            "/api/jobs", data={
+                "title": "测试角色", "quality_target": "production", "multi_views": "true",
+                "multi_view_strategy": "four",
+            },
+        )
+        assert predicted_view_production.status_code == 400
 

@@ -87,8 +87,21 @@ function syncImageSelection() {
 }
 
 $("#model-mode").addEventListener("change", () => {
-  if ($("#model-mode").value === "parts") $("#multi-views").checked = false;
+  if ($("#model-mode").value === "parts") {
+    $("#multi-views").checked = false;
+    $("#quality-target").value = "prototype";
+  }
   $("#multi-views").disabled = $("#model-mode").value === "parts";
+  syncMultiViewInputs();
+});
+
+$("#quality-target").addEventListener("change", () => {
+  if ($("#quality-target").value === "production") {
+    $("#model-mode").value = "whole";
+    $("#multi-views").disabled = false;
+    $("#multi-views").checked = true;
+    $("#multi-view-strategy").value = "four";
+  }
   syncMultiViewInputs();
 });
 
@@ -142,6 +155,18 @@ $("#build-sample-views").addEventListener("click", async (event) => {
 
 $("#create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if ($("#quality-target").value === "production") {
+    const uploadIds = ["asset-image", "view-right", "view-back", "view-left"];
+    if (
+      $("#model-mode").value !== "whole" ||
+      !$("#multi-views").checked ||
+      $("#multi-view-strategy").value !== "four" ||
+      uploadIds.some((name) => !document.getElementById(name).files.length)
+    ) {
+      notify("赛季游戏资产需要同一角色的正面、右面、背面和左面四张实际参考图，请上传对应图片。", 11000);
+      return;
+    }
+  }
   const button = $("#submit-job");
   const form = new FormData(event.target);
   if (!$("#asset-image").files.length) form.delete("image");
@@ -189,7 +214,7 @@ async function refreshJobs() {
     const fileUrl = `/api/jobs/${job.id}/file/`;
     return `<article class="job-card">
       <div class="job-head"><strong>${escapeHtml(job.title)}</strong><span class="label-state ${escapeHtml(job.status)}">${status}</span></div>
-      <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(imageModels[job.params?.image_model] || "已有原画")} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
+      <div class="job-meta">${escapeHtml(types[job.kind] || job.kind)} · ${job.params?.quality_target === "production" ? "四视角游戏候选" : "原画实验或历史任务"} · ${job.mode === "whole" ? "完整模型" : job.mode === "parts" ? "拆分部件" : "GLB 优化"} · ${escapeHtml(imageModels[job.params?.image_model] || "已有原画")} · ${escapeHtml(job.stage)} · ${escapeHtml(job.created_at.slice(0, 19).replace("T", " "))}</div>
       ${job.has_preview ? `<a class="job-concept-link" href="${fileUrl}input.png" target="_blank" rel="noopener noreferrer"><img src="${fileUrl}input.png" alt="${escapeHtml(job.title)} 原画" loading="lazy"></a>` : ""}
       <div class="progress-track"><div style="width:${Math.round(job.progress * 100)}%"></div></div>
       ${job.error ? `<p class="job-error">${escapeHtml(job.error)}</p>` : ""}

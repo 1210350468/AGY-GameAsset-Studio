@@ -147,6 +147,8 @@ curl -X POST http://127.0.0.1:18333/api/import \
 
 怪物脚底地面检查已集成到 Pixal3D 生成流程：对于白色摄影棚背景的怪物原画，`foreground_prep.py` 提取带透明度的主体遮罩，保留原始 PNG；`ground_artifacts.py` 检测模型最低 5.5% 高度的近水平表面与主体水平包围盒面积比例，超过 7.5% 时触发脚底异常。对于未绑定骨骼的新怪物，`blender/repair_ground_base.py` 执行有几何验证的底部裁切，保存 `ground_repair.json` 和清理后的 GLB，随后继续执行原有的材质、网格、轮廓与 Godot 导入检查。
 
+正式游戏资产制作入口默认为「赛季游戏资产候选」。上传原画必须为同一资产的正面、右面、背面、左面四张独立参考图，使用 Pixal3D 官方四视角模型；缺少参考视图的工作只能进入「概念实验」，作为美术设计和重建研究候选。API 参数为 `quality_target=production` 或 `quality_target=prototype`，其中正式制作模式严格检查完整四视图输入，无法通过自动猜测背面和侧面绕过。多视角模型的相机姿态及造型细节仍依赖真实几何检查，模型制作后的游戏质量审核仍然必需。已有授权原始三维模型可通过 AGY 的 GLB 导入入口加工。
+
 已有 Pixal3D 怪物可从工作台选择「清理怪物脚底地面并重建」（原画重新生成）或「修复已生成的底部连片网格」（保留原模型并独立生成修复候选）。接口分别为 `POST /api/jobs/{job_id}/repair-ground` 和 `POST /api/jobs/{job_id}/repair-ground-mesh`，后者提交 `height_ratio=0.035`。修复候选仍会按完整几何规则执行审核。已有骨骼的游戏资产由 Blender 的 `--preserve-skin` 模式处理，保持 Armature、顶点权重与材质，之后在 Godot 实际检查骨骼和战斗引用。
 
 从已有任务重新提交多视图重建：`POST /api/jobs/{job_id}/rebuild-multiview`，表单设置 `multi_view_strategy=front-back` 或 `four`，可选上传 `back`、`right`、`left` 参考图片。服务器复用原任务正面图和已保存的其它视角。新任务保留源任务编号；没有完整视角时 Qwen 在 GPU 显存允许时生成。
