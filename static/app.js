@@ -198,6 +198,8 @@ async function refreshJobs() {
       ${job.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${job.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${job.id}">外观不合格</button>` : ""}
       ${["completed", "review_required", "rejected"].includes(job.status) && ["character", "monster"].includes(job.kind) ? `<button class="link-btn" data-texture-repair="${job.id}">修复黑色贴图残留</button>` : ""}
       ${job.params?.multi_views ? `<a class="link-btn" href="/api/jobs/${job.id}/references" target="_blank">多视角参考</a>` : ""}
+      ${job.kind === "monster" && job.has_preview && ["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-repair-ground="${job.id}">清理怪物脚底地面并重建</button>` : ""}
+      ${job.kind === "monster" && ["completed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-repair-ground-mesh="${job.id}">修复已生成的底部连片网格</button>` : ""}
       ${job.has_preview && ["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-rebuild-multiview="${job.id}" data-strategy="front-back">Pixal3D 正反双视角重建</button><button class="link-btn" data-rebuild-multiview="${job.id}" data-strategy="four">Pixal3D 四视角重建</button>` : ""}
       ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-preserve-high-fidelity="${job.params?.source_job || job.id}">保留高精度原网格并打包</button>` : ""}
       ${["completed", "failed", "review_required", "rejected"].includes(job.status) ? `<button class="link-btn" data-reprocess="${job.id}">重新优化网格</button>` : ""}
@@ -225,7 +227,7 @@ function renderAssets() {
     const url = `/api/jobs/${asset.id}/file/`;
     return `<article class="asset-card"><div class="asset-thumb">${asset.has_preview ? `<img loading="lazy" src="${url}input.png" alt="${escapeHtml(asset.title)}">` : `<div class="asset-thumb-empty">3D</div>`}<span class="asset-kind-tag">${escapeHtml(types[asset.kind] ?? asset.kind)}</span></div>
     <div class="asset-info"><h3>${escapeHtml(asset.title)}</h3><p>${asset.mode === "parts" ? "独立部件" : asset.mode === "import" ? "GLB 导入" : "完整三维模型"} · ${escapeHtml(asset.created_at.slice(0, 10))}${asset.status === "review_required" ? " · 等待外观审核" : asset.status === "rejected" ? " · 外观不合格" : ""}</p>
-      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button>${asset.has_preview ? `<button class="link-btn" data-rebuild-multiview="${asset.id}" data-strategy="four">Pixal3D 四视角重建</button>` : ""}${["character", "monster"].includes(asset.kind) ? `<button class="link-btn" data-texture-repair="${asset.id}">修复黑色贴图残留</button>` : ""}${asset.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${asset.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${asset.id}">外观不合格</button>` : ""}</div></div></article>`;
+      <div class="asset-actions"><a class="link-btn asset-open" href="/?asset=${asset.id}">查看模型与质量</a><a class="link-btn" href="${url}godot_asset.zip">下载资源包</a><button class="link-btn" data-reprocess="${asset.id}">重新优化</button>${asset.has_preview ? `<button class="link-btn" data-rebuild-multiview="${asset.id}" data-strategy="four">Pixal3D 四视角重建</button>` : ""}${asset.kind === "monster" && asset.has_preview ? `<button class="link-btn" data-repair-ground="${asset.id}">清理脚底地面并重建</button><button class="link-btn" data-repair-ground-mesh="${asset.id}">修复现有模型地面网格</button>` : ""}${["character", "monster"].includes(asset.kind) ? `<button class="link-btn" data-texture-repair="${asset.id}">修复黑色贴图残留</button>` : ""}${asset.status === "review_required" ? `<button class="link-btn" data-review-action="approve" data-review-id="${asset.id}">外观合格</button><button class="link-btn" data-review-action="reject" data-review-id="${asset.id}">外观不合格</button>` : ""}</div></div></article>`;
   }).join("") : `<div class="panel muted">当前条件下没有可查看的资产。</div>`;
 }
 
@@ -255,6 +257,34 @@ async function refreshSystem() {
 }
 
 document.addEventListener("click", async (event) => {
+  const groundMeshButton = event.target.closest("[data-repair-ground-mesh]");
+  if (groundMeshButton) {
+    groundMeshButton.disabled = true;
+    const body = new FormData();
+    body.set("height_ratio", "0.035");
+    try {
+      const result = await api(`/api/jobs/${groundMeshButton.dataset.repairGroundMesh}/repair-ground-mesh`, {method: "POST", body});
+      notify(`底部连片面积 ${(result.ground_footprint_before * 100).toFixed(1)}% → ${(result.ground_footprint_after * 100).toFixed(1)}%，游戏资源打包任务已登记`);
+      navigate("jobs");
+    } catch (error) {
+      notify(`底部网格修复失败：${error.message}`, 11000);
+      groundMeshButton.disabled = false;
+    }
+    return;
+  }
+  const groundButton = event.target.closest("[data-repair-ground]");
+  if (groundButton) {
+    groundButton.disabled = true;
+    try {
+      const result = await api(`/api/jobs/${groundButton.dataset.repairGround}/repair-ground`, {method: "POST"});
+      notify(`怪物脚底地面清理与 Pixal3D 重建任务已提交：${result.job_id.slice(0, 8)}`);
+      navigate("jobs");
+    } catch (error) {
+      notify(`怪物地面修复提交失败：${error.message}`, 11000);
+      groundButton.disabled = false;
+    }
+    return;
+  }
   const preserveButton = event.target.closest("[data-preserve-high-fidelity]");
   if (preserveButton) {
     preserveButton.disabled = true;
@@ -500,9 +530,10 @@ async function openViewer(id, title, hasPreview = true, hasFastPreview = false) 
     const needsVisualReview = quality.visual_review_required;
     const assessment = needsRepair ? "网格结构需要修复" : needsVisualReview ? "结构检查通过 · 外观等待审核" : "网格结构检查通过";
     const silhouette = appearance ? `<div><small>原画轮廓匹配</small><strong>${(appearance.silhouette_iou * 100).toFixed(1)}%</strong></div>` : "";
+    const ground = quality.ground_artifacts ? `<div><small>脚底近水平表面占比</small><strong>${(quality.ground_artifacts.ground_footprint_area_ratio * 100).toFixed(2)}%</strong></div>` : "";
     const texture = quality.texture_repair;
     const textureResult = texture ? `<div><small>修复前下半身透明纹理采样</small><strong>${(texture.before.lower_body.transparent_texture_ratio * 100).toFixed(1)}%</strong></div><div><small>修复后下半身透明纹理采样</small><strong>${(texture.after.lower_body.transparent_texture_ratio * 100).toFixed(1)}%</strong></div>` : "";
-    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${assessment}</strong><span>结构指标与实际造型分别验收</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div>${silhouette}${textureResult}</div>${reasons.length ? `<div class="quality-reasons">${reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
+    $("#viewer-quality").innerHTML = `<div class="quality-intro"><strong>${assessment}</strong><span>结构指标与实际造型分别验收</span></div><div class="quality-metrics"><div><small>三角面</small><strong>${quality.faces.toLocaleString()}</strong></div><div><small>最大连续部分</small><strong>${connected}%</strong></div><div><small>开放边界比例</small><strong>${edges}%</strong></div><div><small>非流形边</small><strong>${quality.non_manifold_edges.toLocaleString()}</strong></div><div><small>纹理</small><strong>${quality.images} 张</strong></div><div><small>骨骼</small><strong>${quality.joints} 个</strong></div>${silhouette}${ground}${textureResult}</div>${reasons.length ? `<div class="quality-reasons">${reasons.map((reason) => `<p>⚠ ${escapeHtml(reason)}</p>`).join("")}</div>` : ""}`;
   }).catch((error) => { if (viewer === active) $("#viewer-quality").textContent = `质量检查失败：${error.message}`; });
   function render() {
     if (!viewer || viewer.renderer !== renderer) return;

@@ -198,6 +198,7 @@ async def create_job(
     multi_views: bool = Form(False),
     multi_view_strategy: str = Form("front-back"),
     pixal_low_vram: bool = Form(True),
+    clean_floor_shadow: bool = Form(True),
 ) -> dict:
     if kind not in {"character", "monster", "weapon", "equipment", "prop", "scene"}:
         raise HTTPException(400, "资产类型无效")
@@ -263,6 +264,7 @@ async def create_job(
         "image_model": image_model, "image_count": image_count, "multi_views": multi_views,
         "multi_view_strategy": multi_view_strategy,
         "pixal_low_vram": pixal_low_vram,
+        "clean_floor_shadow": clean_floor_shadow if kind == "monster" else False,
     }
     job_id = pipeline.create(
         title=title.strip(), kind=kind, mode=mode, params=params,
@@ -323,6 +325,97 @@ async def rebuild_multiview(
         input_bytes=stored["front"], reference_views=views,
     )
     return {"job_id": new_id, "status": "queued", "url": f"/api/jobs/{new_id}"}
+
+
+@app.post("/api/jobs/{job_id}/repair-ground", status_code=202)
+def repair_monster_ground(job_id: str) -> dict:
+    original = get_job(job_id)
+    if original["kind"] != "monster" or original["mode"] != "whole":
+        raise HTTPException(400, "脚底地面重建适用于 Pixal3D 怪物任务")
+    if original["status"] in {"running", "queued"}:
+        raise HTTPException(409, "原任务还在执行")
+    source = job_dir(job_id) / "input.png"
+    if not source.is_file():
+        raise HTTPException(409, "原任务缺少参考原画")
+    ensure_tool("pixal3d")
+    ensure_tool("blender")
+    ensure_tool("godot")
+    params = dict(original["params"])
+    params.update({
+        "source_job": job_id,
+        "clean_floor_shadow": True,
+        "multi_views": False,
+        "rig": False,
+        "pixal_low_vram": True,
+        "seed": (int(params.get("seed", 42)) + 1) % (2 ** 32),
+    })
+    repaired_id = pipeline.create(
+        title=original["title"] + " · 脚底地面重建",
+        kind="monster", mode="whole", params=params,
+        input_bytes=source.read_bytes(),
+    )
+    return {"job_id": repaired_id, "status": "queued", "url": f"/api/jobs/{repaired_id}"}
+
+
+@app.post("/api/jobs/{job_id}/repair-ground-mesh", status_code=202)
+def repair_monster_ground_mesh(
+    job_id: str,
+    height_ratio: float = Form(0.035),
+) -> dict:
+    original = get_job(job_id)
+    if original["kind"] != "monster" or original["status"] in {"queued", "running"}:
+        raise HTTPException(409, "仅支持已生成的怪物模型")
+    if not 0.01 <= height_ratio <= 0.055:
+        raise HTTPException(400, "脚底裁切高度须在模型高度的 1%～5.5%")
+    source = job_dir(job_id) / "model.glb"
+    if not source.is_file():
+        raise HTTPException(409, "原任务缺少 GLB")
+    original_quality = inspect_game_mesh_quality(source, profile="monster")
+    if not original_quality["ground_artifacts"]["ground_anomaly_detected"]:
+        raise HTTPException(409, "当前模型未检测到需要裁切的脚底地面")
+    if original_quality["skinned"]:
+        raise HTTPException(409, "已绑定骨骼的怪物需要在绑定之前处理网格")
+    blender = settings.blender_binary()
+    if blender is None:
+        raise HTTPException(503, "Blender 未安装")
+    output = settings.data_root / "ground_repairs" / (uuid.uuid4().hex + ".glb")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        blender, "--background", "--python-exit-code", "1", "--python",
+        str(settings.root / "blender" / "repair_ground_base.py"), "--",
+        "--input", str(source), "--output", str(output),
+        "--height-ratio", str(height_ratio),
+    ], stdin=subprocess.DEVNULL, timeout=settings.timeout_seconds, check=True)
+    quality = inspect_game_mesh_quality(output, profile="monster")
+    original_ground = original_quality["ground_artifacts"]["ground_footprint_area_ratio"]
+    repaired_ground = quality["ground_artifacts"]["ground_footprint_area_ratio"]
+    if repaired_ground >= 0.075 or original_ground - repaired_ground < 0.04:
+        raise ValueError(f"地面修复未达到要求：{original_ground:.2%} → {repaired_ground:.2%}")
+    if quality["images"] != original_quality["images"] or quality["faces"] < original_quality["faces"] * 0.8:
+        raise ValueError("脚底地面裁切损坏了材质或主体结构")
+    reference = job_dir(job_id) / "input.png"
+    params = {
+        **original["params"],
+        "rig": False,
+        "strict_geometry": True,
+        "preserve_geometry": True,
+        "source_job": job_id,
+        "ground_repair_height_ratio": height_ratio,
+        "ground_ratio_before": original_ground,
+        "ground_ratio_after": repaired_ground,
+    }
+    repaired_id = pipeline.create(
+        title=original["title"] + " · 地面网格清理候选",
+        kind="monster", mode="import", params=params,
+        input_bytes=output.read_bytes(),
+        reference_image_bytes=reference.read_bytes() if reference.is_file() else None,
+    )
+    return {
+        "job_id": repaired_id, "status": "queued",
+        "url": f"/api/jobs/{repaired_id}",
+        "ground_footprint_before": original_ground,
+        "ground_footprint_after": repaired_ground,
+    }
 
 
 @app.post("/api/nextgen/build", status_code=202)

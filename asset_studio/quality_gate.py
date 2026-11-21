@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from asset_studio.quality import inspect_model
+from asset_studio.ground_artifacts import inspect_ground_artifacts
 
 
 MIN_LARGEST_COMPONENT_RATIO = 0.97
@@ -66,7 +67,21 @@ def assess_game_mesh_report(
 def inspect_game_mesh_quality(
     model: Path, *, baseline: dict | None = None, profile: str = "character",
 ) -> dict:
-    return assess_game_mesh_report(inspect_model(model), baseline=baseline, profile=profile)
+    quality = inspect_model(model)
+    if profile == "monster" and not quality["skinned"]:
+        ground = inspect_ground_artifacts(model)
+        quality["ground_artifacts"] = {
+            key: value for key, value in ground.items()
+            if key not in {"candidate_faces", "candidate_component_ids"}
+        }
+    evaluated = assess_game_mesh_report(quality, baseline=baseline, profile=profile)
+    if profile == "monster" and evaluated.get("ground_artifacts", {}).get("ground_anomaly_detected"):
+        evaluated["game_readiness_reasons"].append(
+            "怪物脚底存在疑似地面连片：近水平表面投影面积占比 "
+            f"{evaluated['ground_artifacts']['ground_footprint_area_ratio']:.2%}"
+        )
+        evaluated["game_ready"] = False
+    return evaluated
 
 
 def require_ready_geometry(quality: dict) -> None:

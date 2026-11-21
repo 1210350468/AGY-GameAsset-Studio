@@ -23,6 +23,8 @@ from asset_studio.quality import inspect_model
 from asset_studio.quality_gate import inspect_game_mesh_quality
 from asset_studio.appearance import inspect_silhouette
 from asset_studio.texture_repair import repair_opaque_atlas
+from asset_studio.foreground_prep import prepare_clean_foreground
+from asset_studio.ground_artifacts import inspect_ground_artifacts
 from asset_studio.store import Store, timestamp
 
 
@@ -196,10 +198,20 @@ class AssetPipeline:
                         low_vram = params.get("pixal_low_vram", settings.pixal_low_vram)
                         gpu_index = choose_3d_gpu(settings, low_vram_pixal=low_vram)
                         self._stage(job_id, "Pixal3D 多视角重建" if use_multiview else "Pixal3D 重建与材质生成", 0.35)
+                        pixal_input = concept
+                        if (job["kind"] == "monster" and not use_multiview
+                                and params.get("clean_floor_shadow", True)):
+                            pixal_input = job_dir / "foreground.png"
+                            diagnostics = prepare_clean_foreground(concept, pixal_input)
+                            (job_dir / "foreground_quality.json").write_text(
+                                json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding="utf-8",
+                            )
+                            log.write("怪物原画清除背景与脚底阴影：" + json.dumps(diagnostics, ensure_ascii=False) + "\n")
+                            log.flush()
                         args = [
                             str(settings.pixal_python), "inference_mv.py" if use_multiview else "inference.py",
                         ]
-                        args.extend(["--views_dir", str(job_dir / "pixal_views")] if use_multiview else ["--image", str(concept)])
+                        args.extend(["--views_dir", str(job_dir / "pixal_views")] if use_multiview else ["--image", str(pixal_input)])
                         args.extend([
                             "--output", str(generated), "--seed", str(params["seed"]),
                             "--model_path", str(settings.pixal_model_path),
@@ -231,6 +243,38 @@ class AssetPipeline:
                     generated = output_root / job_id / "object.glb"
                 else:
                     raise RuntimeError(f"Unsupported mode: {job['mode']}")
+
+                if job["kind"] == "monster" and job["mode"] == "whole" and params.get("clean_ground_mesh", True):
+                    before = inspect_ground_artifacts(generated)
+                    if before["ground_anomaly_detected"]:
+                        self._stage(job_id, "Blender 修复怪物脚底地面连片", 0.58)
+                        clipped = job_dir / "ground_cleaned.glb"
+                        blender = settings.blender_binary()
+                        if blender is None:
+                            raise FileNotFoundError("Blender 未安装")
+                        self._command([
+                            blender, "--background", "--python-exit-code", "1", "--python",
+                            str(settings.root / "blender" / "repair_ground_base.py"), "--",
+                            "--input", str(generated), "--output", str(clipped),
+                            "--height-ratio", "0.035",
+                        ], cwd=job_dir, log=log, env={"CUDA_VISIBLE_DEVICES": ""})
+                        after = inspect_ground_artifacts(clipped)
+                        if (after["ground_anomaly_detected"]
+                                or before["ground_footprint_area_ratio"] - after["ground_footprint_area_ratio"] < 0.04):
+                            raise ValueError(
+                                "怪物脚底地面修复未达到要求："
+                                f"{before['ground_footprint_area_ratio']:.2%} → "
+                                f"{after['ground_footprint_area_ratio']:.2%}"
+                            )
+                        (job_dir / "ground_repair.json").write_text(json.dumps({
+                            "source": str(generated),
+                            "output": str(clipped),
+                            "ground_ratio_before": before["ground_footprint_area_ratio"],
+                            "ground_ratio_after": after["ground_footprint_area_ratio"],
+                            "original_faces": before["faces"],
+                            "remaining_faces": after["faces"],
+                        }, ensure_ascii=False, indent=2), encoding="utf-8")
+                        generated = clipped
 
                 if params["rig"]:
                     gpu_index = choose_3d_gpu(settings)
